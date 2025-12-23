@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>limetuna · Letters</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+  />
+<link rel="stylesheet" href="css/styles.css" />
+
+<!-- MUST load cordova.js here too -->
+<script src="cordova.js"></script>
+
+<!-- Letters game logic -->
+<script src="js/letters.js" defer></script>
+
+</head>
+<body>
+  <div id="lettersApp" class="letters-app">
+    <header class="app-header">
+      <h1 class="app-title">limetuna</h1>
+      <p class="app-subtitle">Letters game – say the letter</p>
+    </header>
+
+    <main class="letters-main">
+      <section class="letters-card">
+        <div class="letters-progress" id="lettersProgress">
+          1 / 10
+        </div>
+
+        <div class="letters-current-letter" id="currentLetter">
+          A
+        </div>
+
+        <div class="letters-status" id="lettersStatus">
+          Listening…
+        </div>
+
+        <div class="letters-feedback" id="lettersFeedback">
+          <!-- Correct / wrong feedback here -->
+        </div>
+
+        <div class="letters-final-score hidden" id="finalScore">
+          <!-- Final score will appear here -->
+        </div>
+
+<div class="letters-controls">
+  <button id="restartGameBtn" class="btn-secondary hidden">
+    Restart game
+  </button>
+  <button id="backToHomeBtn" class="btn-tertiary">
+    ← Back to games
+  </button>
+</div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- Audio feedback -->
+  <audio id="soundCorrect" src="audio/correct.wav" preload="auto"></audio>
+  <audio id="soundWrong" src="audio/wrong.wav" preload="auto"></audio>
+  <audio id="soundWin" src="audio/win.wav" preload="auto"></audio>
+  <audio id="soundLose" src="audio/lose.wav" preload="auto"></audio>
+</body>
+</html>

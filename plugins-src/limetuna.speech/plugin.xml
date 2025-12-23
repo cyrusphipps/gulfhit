@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<plugin id="limetuna.speech"
+        version="1.0.0"
+        xmlns="http://apache.org/cordova/ns/plugins/1.0"
+        xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <name>LimeTunaSpeech</name>
+    <description>Custom speech recognizer for LimeTuna (no dialog, beeps muted)</description>
+    <license>MIT</license>
+
+    <!-- JS bridge -->
+    <js-module src="www/LimeTunaSpeech.js" name="LimeTunaSpeech">
+        <clobbers target="LimeTunaSpeech" />
+        <clobbers target="window.LimeTunaSpeech" />
+    </js-module>
+
+    <platform name="android">
+
+        <!-- Wire the JS service name "LimeTunaSpeech" to the Java class -->
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="LimeTunaSpeech">
+                <param name="android-package" value="com.limetuna.speech.LimeTunaSpeech" />
+                <param name="onload" value="true" />
+            </feature>
+        </config-file>
+
+        <!-- Permissions for mic + audio muting -->
+        <config-file target="AndroidManifest.xml" parent="/*">
+            <uses-permission android:name="android.permission.RECORD_AUDIO" />
+            <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+        </config-file>
+
+        <!-- Native Java file -->
+        <source-file src="src/android/LimeTunaSpeech.java"
+                     target-dir="src/com/limetuna/speech" />
+    </platform>
+</plugin>

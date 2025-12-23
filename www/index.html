@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>limetuna</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+  />
+
+  <link rel="stylesheet" href="css/styles.css" />
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1 class="app-title">limetuna</h1>
+      <p class="app-subtitle">Tap a game to begin</p>
+    </header>
+
+    <main class="app-main">
+      <section id="tilesGrid" class="tiles-grid">
+        <!-- Tiles injected by app.js -->
+      </section>
+    </main>
+  </div>
+
+  <!-- Simple modal for "started app" message -->
+  <div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="modalTitle" class="modal-title"></h2>
+      <p id="modalBody" class="modal-body"></p>
+      <button id="modalCloseBtn" class="btn-primary">Close</button>
+    </div>
+  </div>
+</body>
+</html>

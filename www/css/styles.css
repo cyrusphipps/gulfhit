@@ -1,0 +1,340 @@
+:root {
+  /* Palette: calm, kid-friendly but not clowny */
+  --color-bg-start: #fdfcfb;
+  --color-bg-end: #e9f5ff;
+
+  --color-accent-1: #6ecb63; /* soft lime/green */
+  --color-accent-2: #4ea8de; /* blue */
+  --color-accent-3: #ffb86c; /* warm orange */
+  --color-accent-4: #ff7f9c; /* pink */
+  --color-accent-5: #b794f4; /* lavender */
+  --color-accent-6: #ffd166; /* yellow */
+
+  --color-text-main: #263238;
+  --color-tile-text: #1b2430;
+
+  --radius-large: 24px;
+  --radius-medium: 18px;
+  --shadow-soft: 0 10px 20px rgba(0, 0, 0, 0.08);
+}
+
+/* Reset-ish */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: linear-gradient(145deg, var(--color-bg-start), var(--color-bg-end));
+  color: var(--color-text-main);
+}
+
+/* App wrapper */
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+/* Header */
+.app-header {
+  text-align: center;
+  padding: 8px 8px 12px 8px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 2.1rem;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+.app-subtitle {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+  opacity: 0.8;
+}
+
+/* Main content */
+.app-main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.tiles-grid {
+  width: 100%;
+  max-width: 900px; /* good for 10–11" tablets */
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* default: portrait */
+  gap: 16px;
+  padding: 8px;
+}
+
+/* Landscape: 3 columns (3x2 when 6 tiles) */
+@media (orientation: landscape) {
+  .tiles-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* If it's a narrow phone, tighten spacing slightly */
+@media (max-width: 480px) {
+  .tiles-grid {
+    gap: 12px;
+  }
+}
+
+/* Tile styling */
+.game-tile {
+  position: relative;
+  border: none;
+  border-radius: var(--radius-large);
+  padding: 16px 12px;
+  background-color: #ffffff;
+  box-shadow: var(--shadow-soft);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+
+  /* Large tap target */
+  min-height: 140px;
+  touch-action: manipulation;
+
+  transition:
+    transform 0.12s ease-out,
+    box-shadow 0.12s ease-out,
+    background-color 0.12s ease-out;
+}
+
+/* Slightly bigger on tablets */
+@media (min-width: 768px) {
+  .game-tile {
+    min-height: 180px;
+  }
+}
+
+.game-tile:focus {
+  outline: 3px solid rgba(78, 168, 222, 0.6);
+  outline-offset: 2px;
+}
+
+.game-tile:active {
+  transform: scale(0.97);
+  box-shadow: 0 5px 12px rgba(0, 0, 0, 0.12);
+}
+
+/* Hover for mouse use (ignored by touch) */
+@media (hover: hover) and (pointer: fine) {
+  .game-tile:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+  }
+}
+
+/* Tile color accents using nth-child */
+.game-tile:nth-child(1) {
+  background: linear-gradient(135deg, #e6fffa, #c6f6d5);
+}
+.game-tile:nth-child(2) {
+  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+}
+.game-tile:nth-child(3) {
+  background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+}
+.game-tile:nth-child(4) {
+  background: linear-gradient(135deg, #fce4ec, #f8bbd0);
+}
+.game-tile:nth-child(5) {
+  background: linear-gradient(135deg, #ede7f6, #d1c4e9);
+}
+.game-tile:nth-child(6) {
+  background: linear-gradient(135deg, #fff8e1, #ffe082);
+}
+
+.tile-icon {
+  font-size: 2.3rem;
+  margin-bottom: 8px;
+}
+
+.tile-label {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--color-tile-text);
+}
+
+/* Modal overlay & modal content */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+.modal {
+  background: #ffffff;
+  border-radius: var(--radius-medium);
+  padding: 20px 18px 16px 18px;
+  max-width: 360px;
+  width: 85%;
+  box-shadow: var(--shadow-soft);
+  text-align: center;
+}
+
+.modal-title {
+  margin: 0 0 8px 0;
+  font-size: 1.4rem;
+}
+
+.modal-body {
+  margin: 0 0 16px 0;
+  font-size: 1rem;
+  opacity: 0.9;
+}
+
+/* Simple primary button */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 20px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  background: linear-gradient(135deg, var(--color-accent-1), var(--color-accent-2));
+  color: #ffffff;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.15);
+  transition:
+    transform 0.12s ease-out,
+    box-shadow 0.12s ease-out;
+}
+
+.btn-primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18);
+}
+
+/* Utility */
+.hidden {
+  display: none !important;
+}
+
+
+/* Letters game layout */
+
+.letters-app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
+}
+
+.letters-main {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.letters-card {
+  background: #ffffff;
+  border-radius: var(--radius-large);
+  box-shadow: var(--shadow-soft);
+  padding: 24px 20px;
+  max-width: 480px;
+  width: 90%;
+  text-align: center;
+}
+
+.letters-progress {
+  font-size: 0.95rem;
+  opacity: 0.7;
+  margin-bottom: 12px;
+}
+
+.letters-current-letter {
+  font-size: 10rem; /* was 5rem; now doubled for better visibility */
+  font-weight: 700;
+  margin-bottom: 12px;
+  letter-spacing: 0.08em;
+}
+
+.letters-status {
+  font-size: 1rem;
+  margin-bottom: 8px;
+  opacity: 0.8;
+}
+
+.letters-feedback {
+  min-height: 24px;
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+
+.letters-final-score {
+  margin-top: 8px;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.letters-controls {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Secondary & tertiary buttons for this screen */
+
+.btn-secondary,
+.btn-tertiary {
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+}
+
+.btn-secondary {
+  background: linear-gradient(135deg, var(--color-accent-2), var(--color-accent-5));
+  color: #ffffff;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+}
+
+.btn-secondary:active {
+  transform: scale(0.97);
+}
+
+.btn-tertiary {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--color-text-main);
+}
+
+.btn-tertiary:active {
+  transform: scale(0.97);
+}
+
