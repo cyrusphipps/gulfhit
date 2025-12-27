@@ -345,6 +345,15 @@ function startNewGame() {
         startListeningForCurrentLetter();
       },
       function (err) {
+        if (window.cordova && window.LimeTunaSpeech) {
+          if (LimeTunaSpeech.setKeepScreenOn) {
+            LimeTunaSpeech.setKeepScreenOn(false);
+          }
+          if (LimeTunaSpeech.setBeepsMuted) {
+            LimeTunaSpeech.setBeepsMuted(false);
+          }
+        }
+
         sttEnabled = false;
         sttFatalError = true;
 
@@ -358,6 +367,14 @@ function startNewGame() {
     );
   } else {
     sttEnabled = false;
+    if (window.LimeTunaSpeech) {
+      if (LimeTunaSpeech.setKeepScreenOn) {
+        LimeTunaSpeech.setKeepScreenOn(false);
+      }
+      if (LimeTunaSpeech.setBeepsMuted) {
+        LimeTunaSpeech.setBeepsMuted(false);
+      }
+    }
     statusEl.textContent = "Speech not available in this environment.";
   }
 }
