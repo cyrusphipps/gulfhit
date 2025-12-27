@@ -28,6 +28,16 @@ let soundLoseEl;
 
 // debug timing (to see where the delay is)
 let lastListenStartTs = 0;
+let currentAttemptTiming = null;
+
+let timingPanelEl;
+let timingStageEl;
+let timingSummaryEl;
+let lastTimingRenderMs = 0;
+let timingDisplayState = {
+  stageText: "Timing idle",
+  summaryText: "Timings will appear after you speak."
+};
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -116,6 +126,9 @@ function initLettersGame() {
   finalScoreEl = document.getElementById("finalScore");
   backToHomeBtn = document.getElementById("backToHomeBtn");
   restartGameBtn = document.getElementById("restartGameBtn");
+  timingPanelEl = document.getElementById("lettersTiming");
+  timingStageEl = document.getElementById("timingStage");
+  timingSummaryEl = document.getElementById("timingSummary");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -161,6 +174,103 @@ function initLettersGame() {
   startNewGame();
 }
 
+function formatMs(val) {
+  if (val === null || val === undefined || isNaN(val)) return "n/a";
+  return `${Math.round(val)} ms`;
+}
+
+function updateTimingPanel(partial, force) {
+  if (!timingStageEl || !timingSummaryEl || !timingPanelEl) return;
+
+  timingDisplayState = Object.assign({}, timingDisplayState, partial || {});
+  const now = performance.now();
+  const shouldUpdate = force || now - lastTimingRenderMs > 180;
+  if (!shouldUpdate) {
+    return;
+  }
+
+  timingStageEl.textContent = timingDisplayState.stageText || "";
+  timingSummaryEl.textContent = timingDisplayState.summaryText || "";
+  lastTimingRenderMs = now;
+}
+
+function describeStage(label, timestamp, originTs) {
+  if (!timestamp || !originTs) return `${label} …`;
+  const delta = timestamp - originTs;
+  return `${label} ✓ (+${Math.round(delta)} ms)`;
+}
+
+function buildStageLines(timingPayload) {
+  if (!timingPayload || !timingPayload.native_raw) {
+    return ["Starting…", "Waiting for engine ready…", "Detected speech…", "Engine processing…", "Result received…"];
+  }
+  const raw = timingPayload.native_raw;
+  const anchor = raw.native_received_ms || raw.native_startListening_ms || null;
+  return [
+    describeStage("Starting…", raw.native_startListening_ms, anchor || raw.native_received_ms),
+    describeStage("Waiting for engine ready…", raw.native_readyForSpeech_ms, anchor || raw.native_startListening_ms),
+    describeStage(
+      "Detected speech…",
+      raw.native_beginningOfSpeech_ms || raw.native_firstRmsAboveThreshold_ms,
+      raw.native_readyForSpeech_ms || anchor || raw.native_startListening_ms
+    ),
+    describeStage("Engine processing…", raw.native_endOfSpeech_ms, raw.native_beginningOfSpeech_ms || raw.native_firstRmsAboveThreshold_ms || anchor),
+    describeStage("Result received…", raw.native_results_ms || raw.native_error_ms || raw.native_callback_sent_ms, anchor)
+  ];
+}
+
+function buildTimingSummary(nativeDurations, jsDurations) {
+  const parts = [];
+  if (nativeDurations) {
+    if (nativeDurations.d_queue_native_ms !== undefined) parts.push(`Queue→native: ${formatMs(nativeDurations.d_queue_native_ms)}`);
+    if (nativeDurations.d_engine_ready_ms !== undefined) parts.push(`Engine ready: ${formatMs(nativeDurations.d_engine_ready_ms)}`);
+    if (nativeDurations.d_user_speech_to_engine_ms !== undefined)
+      parts.push(`User→engine: ${formatMs(nativeDurations.d_user_speech_to_engine_ms)}`);
+    if (nativeDurations.d_engine_processing_ms !== undefined)
+      parts.push(`Processing: ${formatMs(nativeDurations.d_engine_processing_ms)}`);
+    if (nativeDurations.d_normalize_ms !== undefined) parts.push(`Normalize: ${formatMs(nativeDurations.d_normalize_ms)}`);
+  }
+
+  if (jsDurations && jsDurations.d_total_js !== undefined) {
+    parts.push(`JS total: ${formatMs(jsDurations.d_total_js)}`);
+  }
+  if (jsDurations && jsDurations.d_audio_start_ms !== undefined) {
+    parts.push(`Audio start after: ${formatMs(jsDurations.d_audio_start_ms)}`);
+  }
+
+  if (parts.length === 0) {
+    return "Awaiting timing data…";
+  }
+  return parts.join(" · ");
+}
+
+function recordJsTiming(key) {
+  if (!currentAttemptTiming) return;
+  currentAttemptTiming[key] = performance.now();
+}
+
+function refreshTimingSummaryAfterAudio() {
+  if (!currentAttemptTiming || !currentAttemptTiming.lastTimingPayload) return;
+
+  const nativeDurations = currentAttemptTiming.lastTimingPayload.native_durations || null;
+  const jsDurations = {};
+  if (currentAttemptTiming.js_start_ms !== undefined) {
+    if (currentAttemptTiming.js_got_result_ms !== undefined) {
+      jsDurations.d_total_js = currentAttemptTiming.js_got_result_ms - currentAttemptTiming.js_start_ms;
+    }
+    if (currentAttemptTiming.js_audio_start_ms !== undefined) {
+      jsDurations.d_audio_start_ms = currentAttemptTiming.js_audio_start_ms - currentAttemptTiming.js_start_ms;
+    }
+  }
+
+  updateTimingPanel(
+    {
+      summaryText: buildTimingSummary(nativeDurations, jsDurations)
+    },
+    true
+  );
+}
+
 function startNewGame() {
   LETTER_SEQUENCE = shuffleArray(ALL_LETTERS).slice(0, 10);
   currentIndex = 0;
@@ -168,6 +278,13 @@ function startNewGame() {
   attemptCount = 0;
   recognizing = false;
   sttFatalError = false;
+  updateTimingPanel(
+    {
+      stageText: "Timing idle",
+      summaryText: "Timings will appear after you speak."
+    },
+    true
+  );
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -255,14 +372,29 @@ function startListeningForCurrentLetter() {
 
   recognizing = true;
   lastListenStartTs = performance.now();
+  currentAttemptTiming = {
+    js_start_ms: lastListenStartTs
+  };
   statusEl.textContent =
     "Phase 1: listening for speech (waiting for Android speech engine)…";
+  console.log("[letters] stage=startListening", {
+    expected,
+    js_start_ms: lastListenStartTs
+  });
+  updateTimingPanel(
+    {
+      stageText: "Waiting for engine ready…",
+      summaryText: "Start request sent to native speech engine…"
+    },
+    true
+  );
 
   LimeTunaSpeech.startLetter(
     expected,
     function (result) {
       const resultArrivalTs = performance.now();
       const engineMs = resultArrivalTs - lastListenStartTs;
+      recordJsTiming("js_got_result_ms");
 
       recognizing = false;
 
@@ -271,6 +403,7 @@ function startListeningForCurrentLetter() {
       const rawText = result && result.text;
       const normalized = result && result.normalizedLetter;
       const expectedUpper = expected.toUpperCase();
+      const timingPayload = result && result.timing;
 
       let isCorrect = false;
       if (normalized && normalized === expectedUpper) {
@@ -279,6 +412,28 @@ function startListeningForCurrentLetter() {
 
       const mapEnd = performance.now();
       const mapMs = mapEnd - mapStart;
+      recordJsTiming("js_decision_ms");
+      if (currentAttemptTiming) {
+        currentAttemptTiming.lastTimingPayload = timingPayload;
+      }
+
+      const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
+      const jsDurations = {};
+      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
+        jsDurations.d_total_js = resultArrivalTs - currentAttemptTiming.js_start_ms;
+      } else {
+        jsDurations.d_total_js = engineMs;
+      }
+      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined && currentAttemptTiming.js_decision_ms !== undefined) {
+        jsDurations.d_decision_ms = currentAttemptTiming.js_decision_ms - currentAttemptTiming.js_start_ms;
+      }
+      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined && currentAttemptTiming.js_audio_start_ms !== undefined) {
+        jsDurations.d_audio_start_ms = currentAttemptTiming.js_audio_start_ms - currentAttemptTiming.js_start_ms;
+      }
+
+      const stageLines = buildStageLines(timingPayload);
+      const stageText = stageLines.join(" · ");
+      const summaryText = buildTimingSummary(nativeDurations, jsDurations);
 
       // 2) Debug: tell you exactly where the time went
       statusEl.textContent =
@@ -287,16 +442,24 @@ function startListeningForCurrentLetter() {
           1
         )} ms.\n` +
         `Heard: "${rawText || ""}" → "${normalized || ""}" (expected "${expectedUpper}")\n` +
-        `Phase 3: scoring and playing ${
-          isCorrect ? "correct" : "wrong"
-        } sound…`;
+        `Phase 3: scoring and playing ${isCorrect ? "correct" : "wrong"} sound…\n` +
+        `Timings: ${summaryText}`;
 
-      console.log("[Letters] timings", {
+      console.log("[letters] result received", {
         engineMs,
         mapMs,
         result,
         expected: expectedUpper,
+        timing: timingPayload,
+        jsDurations
       });
+      updateTimingPanel(
+        {
+          stageText,
+          summaryText
+        },
+        true
+      );
 
       if (isCorrect) {
         handleCorrect();
@@ -309,9 +472,36 @@ function startListeningForCurrentLetter() {
 
       const now = performance.now();
       const engineMs = now - lastListenStartTs;
+      recordJsTiming("js_got_result_ms");
 
       const code = parseErrorCode(err);
       console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
+      const timingPayload = err && err.timing ? err.timing : null;
+      if (currentAttemptTiming) {
+        currentAttemptTiming.lastTimingPayload = timingPayload;
+      }
+      const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
+      const jsDurations = {};
+      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
+        jsDurations.d_total_js = now - currentAttemptTiming.js_start_ms;
+      } else {
+        jsDurations.d_total_js = engineMs;
+      }
+      const stageLines = buildStageLines(timingPayload);
+      const summaryText = buildTimingSummary(nativeDurations, jsDurations);
+      console.log("[letters] stage=error", {
+        code,
+        timing: timingPayload,
+        nativeDurations,
+        jsDurations
+      });
+      updateTimingPanel(
+        {
+          stageText: stageLines.join(" · "),
+          summaryText
+        },
+        true
+      );
 
       if (isHardSttErrorCode(code)) {
         sttFatalError = true;
@@ -320,7 +510,8 @@ function startListeningForCurrentLetter() {
           `Phase 2: engine error after ~${engineMs.toFixed(
             0
           )} ms.\n` +
-          `Speech engine error (${code || "unknown"}). Letters will show without listening.`;
+          `Speech engine error (${code || "unknown"}). Letters will show without listening.\n` +
+          `Timings: ${summaryText}`;
         return;
       }
 
@@ -328,7 +519,8 @@ function startListeningForCurrentLetter() {
         `Phase 2: soft error after ~${engineMs.toFixed(
           0
         )} ms.\n` +
-        `Didn't catch that (error ${code || "unknown"}). Phase 3: retry logic.`;
+        `Didn't catch that (error ${code || "unknown"}). Phase 3: retry logic.\n` +
+        `Timings: ${summaryText}`;
 
       retryOrAdvance();
     }
@@ -346,6 +538,8 @@ function handleCorrect() {
 
   // 1) Give correct.wav a fixed 2s window, no extra hanging,
   // and no overlap with win sound (win plays after endGame).
+  recordJsTiming("js_audio_start_ms");
+  refreshTimingSummaryAfterAudio();
   playSound(soundCorrectEl);
   setTimeout(() => {
     advanceToNextLetter();
@@ -363,6 +557,8 @@ function handleIncorrect() {
     statusEl.textContent += "\nPhase 4: wrong (retry) feedback.";
 
     // After wrong sound, retry listening
+    recordJsTiming("js_audio_start_ms");
+    refreshTimingSummaryAfterAudio();
     playSound(soundWrongEl, () => {
       startListeningForCurrentLetter();
     });
@@ -372,6 +568,8 @@ function handleIncorrect() {
     statusEl.textContent += "\nPhase 4: wrong (advance) feedback.";
 
     // On final wrong, let the sound finish then advance
+    recordJsTiming("js_audio_start_ms");
+    refreshTimingSummaryAfterAudio();
     playSound(soundWrongEl, () => {
       advanceToNextLetter();
     });
