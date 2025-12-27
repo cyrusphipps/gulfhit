@@ -358,12 +358,45 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
     }
 
+    private void ensureTimingAnchors(AttemptTiming timing) {
+        if (timing == null) return;
+
+        if (timing.nativeStartListeningMs <= 0 && timing.nativeReceivedMs > 0) {
+            timing.nativeStartListeningMs = timing.nativeReceivedMs;
+        }
+
+        if (timing.nativeReadyForSpeechMs <= 0 && timing.nativeStartListeningMs > 0) {
+            timing.nativeReadyForSpeechMs = timing.nativeStartListeningMs;
+        }
+
+        if (timing.nativeBeginningOfSpeechMs <= 0) {
+            if (timing.nativeFirstRmsAboveThresholdMs > 0) {
+                timing.nativeBeginningOfSpeechMs = timing.nativeFirstRmsAboveThresholdMs;
+            } else if (timing.nativeReadyForSpeechMs > 0) {
+                timing.nativeBeginningOfSpeechMs = timing.nativeReadyForSpeechMs;
+            }
+        }
+
+        if (timing.nativeEndOfSpeechMs <= 0 && timing.nativeResultsMs > 0) {
+            timing.nativeEndOfSpeechMs = timing.nativeResultsMs;
+        }
+
+        if (timing.nativeNormalizeDoneMs <= 0 && timing.nativeResultsMs > 0) {
+            timing.nativeNormalizeDoneMs = timing.nativeResultsMs;
+        }
+
+        if (timing.nativeCallbackSentMs <= 0 && timing.nativeResultsMs > 0) {
+            timing.nativeCallbackSentMs = timing.nativeResultsMs;
+        }
+    }
+
     private void sendErrorToCallback(String code, String message, AttemptTiming timing) {
         if (currentCallback != null) {
             try {
                 if (timing != null) {
                     timing.nativeErrorMs = SystemClock.elapsedRealtime();
                     timing.nativeCallbackSentMs = timing.nativeErrorMs;
+                    ensureTimingAnchors(timing);
                 }
                 JSONObject obj = buildErrorJsonObject(code, message, timing);
                 currentCallback.error(obj.toString());
@@ -404,6 +437,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
                 if (timing != null) {
                     timing.nativeCallbackSentMs = SystemClock.elapsedRealtime();
+                    ensureTimingAnchors(timing);
                     json.put("timing", buildTimingJson(timing));
                 }
 
