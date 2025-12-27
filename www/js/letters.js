@@ -4,6 +4,18 @@ const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 
+// Speech tuning: tweak endpointing + offline preference for latency experiments
+const SPEECH_TUNING = {
+  // Silence windows: shorter → faster cutoff; adjust if clipping
+  completeSilenceMs: 800,
+  possibleSilenceMs: 600,
+  // Offline preference (requires installed pack); allow fallback if pack missing
+  preferOffline: true,
+  allowCloudFallback: true,
+  // Model hint: try swapping between "web_search" and "free_form"
+  languageModel: "web_search"
+};
+
 let LETTER_SEQUENCE = [];
 let currentIndex = 0;
 let correctCount = 0;
@@ -228,12 +240,14 @@ function buildEngineBreakdown(nativeDurations) {
   let totalMs = 0;
   let count = 0;
 
-  const addComponent = (label, key) => {
+  const addComponent = (label, key, countTowardsTotal = true) => {
     if (nativeDurations[key] !== undefined) {
       const val = nativeDurations[key];
       components.push(`${label}: ${formatMs(val)}`);
-      totalMs += val;
-      count++;
+      if (countTowardsTotal) {
+        totalMs += val;
+        count++;
+      }
     }
   };
 
@@ -241,6 +255,8 @@ function buildEngineBreakdown(nativeDurations) {
   addComponent("Ready for speech", "d_engine_ready_ms");
   addComponent("Speech→engine", "d_user_speech_to_engine_ms");
   addComponent("Engine processing", "d_engine_processing_ms");
+  addComponent("First partial", "d_first_partial_ms", false);
+  addComponent("Final result after partial", "d_final_after_partial_ms", false);
   addComponent("Normalize", "d_normalize_ms");
 
   if (count > 0) {
@@ -416,8 +432,11 @@ function startListeningForCurrentLetter() {
     true
   );
 
+  const startOpts = Object.assign({}, SPEECH_TUNING);
+
   LimeTunaSpeech.startLetter(
     expected,
+    startOpts,
     function (result) {
       const resultArrivalTs = performance.now();
       const engineMs = resultArrivalTs - lastListenStartTs;

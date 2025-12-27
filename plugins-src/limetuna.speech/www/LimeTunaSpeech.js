@@ -155,10 +155,28 @@ var LimeTunaSpeech = (function () {
 
   /**
    * expectedLetter: single letter A–Z (upper or lower)
+   * opts (optional): {
+   *   languageModel: "web_search" | "free_form",
+   *   preferOffline: boolean,
+   *   allowCloudFallback: boolean,
+   *   completeSilenceMs: number,
+   *   possibleSilenceMs: number
+   * }
    */
-  function startLetter(expectedLetter, onResult, onError) {
+  function startLetter(expectedLetter, opts, onResult, onError) {
     if (!_initialized) {
       console.warn("[LimeTunaSpeech] startLetter called before init()");
+    }
+
+    if (typeof opts === "function") {
+      onError = onResult;
+      onResult = opts;
+      opts = null;
+    }
+
+    if (opts && typeof opts !== "object") {
+      console.warn("[LimeTunaSpeech] startLetter opts should be an object; ignoring", opts);
+      opts = null;
     }
 
     exec(
@@ -220,7 +238,7 @@ var LimeTunaSpeech = (function () {
       },
       "LimeTunaSpeech",
       "startLetter",
-      [expectedLetter || ""]
+      [expectedLetter || "", opts || {}]
     );
   }
 
