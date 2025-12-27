@@ -61,7 +61,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         long nativeBeginningOfSpeechMs;
         long nativeFirstRmsAboveThresholdMs;
         long nativeEndOfSpeechMs;
-        long nativeFirstPartialMs;
         long nativeResultsMs;
         long nativeErrorMs;
         long nativeNormalizeDoneMs;
@@ -267,24 +266,18 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
                 timing.expectedLetter = (args != null && args.length() > 0) ? args.optString(0, null) : null;
-
-                JSONObject startOpts = null;
-                if (args != null && args.length() > 1 && !args.isNull(1)) {
-                    startOpts = args.optJSONObject(1);
-                }
                 currentTiming = timing;
                 Log.d(TAG, "LimeTunaSpeech stage=received t=" + timing.nativeReceivedMs + " expected=" + timing.expectedLetter);
 
                 Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                        chooseLanguageModel(startOpts));
+                        RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language);
                 intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
                         cordova.getActivity().getPackageName());
                 intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 10);
                 intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-
-                applyLatencyTuningExtras(intent, startOpts);
+                intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
 
                 try {
                     if (currentTiming != null) {
@@ -365,49 +358,12 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
     }
 
-    private void ensureTimingAnchors(AttemptTiming timing) {
-        if (timing == null) return;
-
-        if (timing.nativeStartListeningMs <= 0 && timing.nativeReceivedMs > 0) {
-            timing.nativeStartListeningMs = timing.nativeReceivedMs;
-        }
-
-        if (timing.nativeReadyForSpeechMs <= 0 && timing.nativeStartListeningMs > 0) {
-            timing.nativeReadyForSpeechMs = timing.nativeStartListeningMs;
-        }
-
-        if (timing.nativeBeginningOfSpeechMs <= 0) {
-            if (timing.nativeFirstRmsAboveThresholdMs > 0) {
-                timing.nativeBeginningOfSpeechMs = timing.nativeFirstRmsAboveThresholdMs;
-            } else if (timing.nativeReadyForSpeechMs > 0) {
-                timing.nativeBeginningOfSpeechMs = timing.nativeReadyForSpeechMs;
-            }
-        }
-
-        if (timing.nativeEndOfSpeechMs <= 0 && timing.nativeResultsMs > 0) {
-            if (timing.nativeFirstPartialMs > 0) {
-                timing.nativeEndOfSpeechMs = timing.nativeFirstPartialMs;
-            } else {
-                timing.nativeEndOfSpeechMs = timing.nativeResultsMs;
-            }
-        }
-
-        if (timing.nativeNormalizeDoneMs <= 0 && timing.nativeResultsMs > 0) {
-            timing.nativeNormalizeDoneMs = timing.nativeResultsMs;
-        }
-
-        if (timing.nativeCallbackSentMs <= 0 && timing.nativeResultsMs > 0) {
-            timing.nativeCallbackSentMs = timing.nativeResultsMs;
-        }
-    }
-
     private void sendErrorToCallback(String code, String message, AttemptTiming timing) {
         if (currentCallback != null) {
             try {
                 if (timing != null) {
                     timing.nativeErrorMs = SystemClock.elapsedRealtime();
                     timing.nativeCallbackSentMs = timing.nativeErrorMs;
-                    ensureTimingAnchors(timing);
                 }
                 JSONObject obj = buildErrorJsonObject(code, message, timing);
                 currentCallback.error(obj.toString());
@@ -448,7 +404,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
                 if (timing != null) {
                     timing.nativeCallbackSentMs = SystemClock.elapsedRealtime();
-                    ensureTimingAnchors(timing);
                     json.put("timing", buildTimingJson(timing));
                 }
 
@@ -605,16 +560,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     @Override
     public void onPartialResults(Bundle partialResults) {
-        Log.d(TAG, "onPartialResults");
-
-        if (!isListening && currentCallback == null) {
-            return;
-        }
-
-        if (currentTiming != null && currentTiming.nativeFirstPartialMs <= 0) {
-            currentTiming.nativeFirstPartialMs = SystemClock.elapsedRealtime();
-            Log.d(TAG, "LimeTunaSpeech stage=first_partial t=" + currentTiming.nativeFirstPartialMs);
-        }
+        // not used
     }
 
     @Override
@@ -726,7 +672,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         putIfPositive(raw, "native_beginningOfSpeech_ms", timing.nativeBeginningOfSpeechMs);
         putIfPositive(raw, "native_firstRmsAboveThreshold_ms", timing.nativeFirstRmsAboveThresholdMs);
         putIfPositive(raw, "native_endOfSpeech_ms", timing.nativeEndOfSpeechMs);
-        putIfPositive(raw, "native_firstPartial_ms", timing.nativeFirstPartialMs);
         putIfPositive(raw, "native_results_ms", timing.nativeResultsMs);
         putIfPositive(raw, "native_error_ms", timing.nativeErrorMs);
         putIfPositive(raw, "native_normalize_done_ms", timing.nativeNormalizeDoneMs);
@@ -746,52 +691,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         putDuration(durations, "d_engine_processing_ms", timing.nativeResultsMs, timing.nativeEndOfSpeechMs);
         putDuration(durations, "d_normalize_ms", timing.nativeNormalizeDoneMs, timing.nativeResultsMs);
-        putDuration(durations, "d_first_partial_ms", timing.nativeFirstPartialMs, timing.nativeEndOfSpeechMs);
-        putDuration(durations, "d_final_after_partial_ms", timing.nativeResultsMs, timing.nativeFirstPartialMs);
 
         timingJson.put("native_raw", raw);
         timingJson.put("native_durations", durations);
 
         return timingJson;
-    }
-
-    private String chooseLanguageModel(JSONObject startOpts) {
-        if (startOpts != null) {
-            String model = startOpts.optString("languageModel", null);
-            if ("free_form".equalsIgnoreCase(model)) {
-                return RecognizerIntent.LANGUAGE_MODEL_FREE_FORM;
-            }
-            if ("web_search".equalsIgnoreCase(model)) {
-                return RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH;
-            }
-        }
-        // default: stick with web search (good for short utterances)
-        return RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH;
-    }
-
-    private void applyLatencyTuningExtras(Intent intent, JSONObject startOpts) {
-        int completeSilenceMs = 700;
-        int possibleSilenceMs = 500;
-        boolean preferOffline = false;
-        boolean allowCloudFallback = true;
-
-        if (startOpts != null) {
-            completeSilenceMs = startOpts.optInt("completeSilenceMs", completeSilenceMs);
-            possibleSilenceMs = startOpts.optInt("possibleSilenceMs", possibleSilenceMs);
-            preferOffline = startOpts.optBoolean("preferOffline", preferOffline);
-            allowCloudFallback = startOpts.optBoolean("allowCloudFallback", allowCloudFallback);
-        }
-
-        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs);
-        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possibleSilenceMs);
-
-        // When offline packs are installed, this reduces latency; fallback behavior depends on engine availability
-        boolean preferOfflineFinal = preferOffline;
-        if (!allowCloudFallback && preferOffline) {
-            // caller explicitly wants offline-only; keep hint true so failures surface quickly
-            preferOfflineFinal = true;
-        }
-        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, preferOfflineFinal);
     }
 
     private void putIfPositive(JSONObject obj, String key, long value) throws JSONException {
