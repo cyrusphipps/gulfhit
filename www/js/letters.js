@@ -219,16 +219,44 @@ function buildStageLines(timingPayload) {
   ];
 }
 
+function buildEngineBreakdown(nativeDurations) {
+  if (!nativeDurations) {
+    return { text: "Engine breakdown unavailable.", totalMs: null };
+  }
+
+  const components = [];
+  let totalMs = 0;
+  let count = 0;
+
+  const addComponent = (label, key) => {
+    if (nativeDurations[key] !== undefined) {
+      const val = nativeDurations[key];
+      components.push(`${label}: ${formatMs(val)}`);
+      totalMs += val;
+      count++;
+    }
+  };
+
+  addComponent("Queue→native", "d_queue_native_ms");
+  addComponent("Ready for speech", "d_engine_ready_ms");
+  addComponent("Speech→engine", "d_user_speech_to_engine_ms");
+  addComponent("Engine processing", "d_engine_processing_ms");
+  addComponent("Normalize", "d_normalize_ms");
+
+  if (count > 0) {
+    components.push(`Approx engine total: ${formatMs(totalMs)}`);
+  }
+
+  const text = components.length ? `Engine breakdown: ${components.join(" · ")}` : "Engine breakdown unavailable.";
+  return { text, totalMs: count > 0 ? totalMs : null };
+}
+
 function buildTimingSummary(nativeDurations, jsDurations) {
   const parts = [];
-  if (nativeDurations) {
-    if (nativeDurations.d_queue_native_ms !== undefined) parts.push(`Queue→native: ${formatMs(nativeDurations.d_queue_native_ms)}`);
-    if (nativeDurations.d_engine_ready_ms !== undefined) parts.push(`Engine ready: ${formatMs(nativeDurations.d_engine_ready_ms)}`);
-    if (nativeDurations.d_user_speech_to_engine_ms !== undefined)
-      parts.push(`User→engine: ${formatMs(nativeDurations.d_user_speech_to_engine_ms)}`);
-    if (nativeDurations.d_engine_processing_ms !== undefined)
-      parts.push(`Processing: ${formatMs(nativeDurations.d_engine_processing_ms)}`);
-    if (nativeDurations.d_normalize_ms !== undefined) parts.push(`Normalize: ${formatMs(nativeDurations.d_normalize_ms)}`);
+
+  const engineBreakdown = buildEngineBreakdown(nativeDurations);
+  if (engineBreakdown && engineBreakdown.text) {
+    parts.push(engineBreakdown.text);
   }
 
   if (jsDurations && jsDurations.d_total_js !== undefined) {
@@ -304,7 +332,7 @@ function startNewGame() {
   }
 
   if (window.LimeTunaSpeech && window.cordova) {
-    statusEl.textContent = "Phase 0: preparing microphone…";
+    statusEl.textContent = "Preparing microphone…";
 
     LimeTunaSpeech.init(
       {
@@ -313,8 +341,7 @@ function startNewGame() {
       function () {
         console.log("LimeTunaSpeech.init success");
         sttEnabled = true;
-        statusEl.textContent =
-          "Phase 1: ready. Say the letter when you're ready.";
+        statusEl.textContent = "Speech ready. Say the letter when you're ready.";
         startListeningForCurrentLetter();
       },
       function (err) {
@@ -376,7 +403,7 @@ function startListeningForCurrentLetter() {
     js_start_ms: lastListenStartTs
   };
   statusEl.textContent =
-    "Phase 1: listening for speech (waiting for Android speech engine)…";
+    "Listening for speech (waiting for Android speech engine)…";
   console.log("[letters] stage=startListening", {
     expected,
     js_start_ms: lastListenStartTs
@@ -434,16 +461,18 @@ function startListeningForCurrentLetter() {
       const stageLines = buildStageLines(timingPayload);
       const stageText = stageLines.join(" · ");
       const summaryText = buildTimingSummary(nativeDurations, jsDurations);
+      const engineBreakdown = buildEngineBreakdown(nativeDurations);
+      const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
 
-      // 2) Debug: tell you exactly where the time went
-      statusEl.textContent =
-        `Phase 2: result received.\n` +
-        `Engine: ~${engineMs.toFixed(0)} ms, JS map: ~${mapMs.toFixed(
-          1
-        )} ms.\n` +
-        `Heard: "${rawText || ""}" → "${normalized || ""}" (expected "${expectedUpper}")\n` +
-        `Phase 3: scoring and playing ${isCorrect ? "correct" : "wrong"} sound…\n` +
-        `Timings: ${summaryText}`;
+      const statusLines = [
+        `Engine response: ~${engineMs.toFixed(0)} ms (JS handling ~${mapMs.toFixed(1)} ms).`,
+        `Heard: "${rawText || ""}" → "${normalized || ""}" (expected "${expectedUpper}")`,
+        engineBreakdownText,
+        `Playing ${isCorrect ? "correct" : "wrong"} sound…`,
+        `Timings: ${summaryText}`
+      ].filter(Boolean);
+
+      statusEl.textContent = statusLines.join("\n");
 
       console.log("[letters] result received", {
         engineMs,
@@ -489,6 +518,8 @@ function startListeningForCurrentLetter() {
       }
       const stageLines = buildStageLines(timingPayload);
       const summaryText = buildTimingSummary(nativeDurations, jsDurations);
+      const engineBreakdown = buildEngineBreakdown(nativeDurations);
+      const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
       console.log("[letters] stage=error", {
         code,
         timing: timingPayload,
@@ -506,21 +537,21 @@ function startListeningForCurrentLetter() {
       if (isHardSttErrorCode(code)) {
         sttFatalError = true;
         sttEnabled = false;
-        statusEl.textContent =
-          `Phase 2: engine error after ~${engineMs.toFixed(
-            0
-          )} ms.\n` +
-          `Speech engine error (${code || "unknown"}). Letters will show without listening.\n` +
-          `Timings: ${summaryText}`;
+        statusEl.textContent = [
+          `Engine error after ~${engineMs.toFixed(0)} ms (code ${code || "unknown"}).`,
+          engineBreakdownText,
+          "Speech engine error. Letters will show without listening.",
+          `Timings: ${summaryText}`
+        ].join("\n");
         return;
       }
 
-      statusEl.textContent =
-        `Phase 2: soft error after ~${engineMs.toFixed(
-          0
-        )} ms.\n` +
-        `Didn't catch that (error ${code || "unknown"}). Phase 3: retry logic.\n` +
-        `Timings: ${summaryText}`;
+      statusEl.textContent = [
+        `Soft error after ~${engineMs.toFixed(0)} ms (error ${code || "unknown"}).`,
+        engineBreakdownText,
+        "Retrying this letter…",
+        `Timings: ${summaryText}`
+      ].join("\n");
 
       retryOrAdvance();
     }
@@ -532,7 +563,7 @@ function handleCorrect() {
 
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
-  statusEl.textContent += "\nPhase 4: correct feedback.";
+  statusEl.textContent += "\nPlaying correct sound…";
 
   correctCount++;
 
@@ -554,7 +585,7 @@ function handleIncorrect() {
   if (isRetry) {
     feedbackEl.textContent = "✕ Try again!";
     feedbackEl.style.color = "#c62828";
-    statusEl.textContent += "\nPhase 4: wrong (retry) feedback.";
+    statusEl.textContent += "\nPlaying wrong sound and retrying…";
 
     // After wrong sound, retry listening
     recordJsTiming("js_audio_start_ms");
@@ -565,7 +596,7 @@ function handleIncorrect() {
   } else {
     feedbackEl.textContent = "✕ Wrong letter.";
     feedbackEl.style.color = "#c62828";
-    statusEl.textContent += "\nPhase 4: wrong (advance) feedback.";
+    statusEl.textContent += "\nPlaying wrong sound and moving on…";
 
     // On final wrong, let the sound finish then advance
     recordJsTiming("js_audio_start_ms");
@@ -604,8 +635,7 @@ function advanceToNextLetter() {
 function endGame() {
   const total = LETTER_SEQUENCE.length;
   statusEl.textContent =
-    "Phase 5: game over.\n" +
-    `You got ${correctCount} out of ${total} letters right.`;
+    "Game over.\n" + `You got ${correctCount} out of ${total} letters right.`;
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
 

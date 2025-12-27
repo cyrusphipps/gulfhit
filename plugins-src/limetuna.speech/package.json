@@ -1,6 +1,6 @@
 {
   "name": "limetuna-speech",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Custom Cordova SpeechRecognizer wrapper for LimeTuna (Android-only).",
   "private": true,
   "keywords": [
