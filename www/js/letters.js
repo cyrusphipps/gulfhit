@@ -560,6 +560,9 @@ function startListeningForCurrentLetter() {
           "Speech engine error. Letters will show without listening.",
           `Timings: ${summaryText}`
         ].join("\n");
+
+        // Continue the game flow even when STT is disabled so the UI can finish updating.
+        advanceToNextLetter({ skipListening: true });
         return;
       }
 
@@ -636,7 +639,9 @@ function retryOrAdvance() {
 
 // --- Game flow ---------------------------------------------------------------
 
-function advanceToNextLetter() {
+function advanceToNextLetter(options) {
+  const skipListening = options && options.skipListening;
+
   currentIndex++;
 
   if (currentIndex >= LETTER_SEQUENCE.length) {
@@ -645,6 +650,9 @@ function advanceToNextLetter() {
     updateUIForCurrentLetter();
     if (sttEnabled && !sttFatalError && window.LimeTunaSpeech && window.cordova) {
       startListeningForCurrentLetter();
+    } else if (skipListening) {
+      // STT is unavailable; keep rendering remaining letters so the session can finish.
+      setTimeout(() => advanceToNextLetter({ skipListening: true }), 300);
     }
   }
 }
