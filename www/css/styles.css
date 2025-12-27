@@ -299,6 +299,26 @@ body {
   font-weight: 600;
 }
 
+.letters-timing-panel {
+  margin: 10px auto 6px;
+  padding: 10px 12px;
+  background: #f7f9fb;
+  border: 1px solid #e1e6ed;
+  border-radius: var(--radius-medium);
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.timing-stage {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.timing-summary {
+  color: #4a4f55;
+  line-height: 1.4;
+}
+
 .letters-controls {
   margin-top: 16px;
   display: flex;
@@ -337,4 +357,3 @@ body {
 .btn-tertiary:active {
   transform: scale(0.97);
 }
-
