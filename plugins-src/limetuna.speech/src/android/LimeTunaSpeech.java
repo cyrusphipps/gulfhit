@@ -9,6 +9,7 @@ import android.media.AudioManager;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -50,6 +51,23 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private int originalNotificationVolume = -1;
     private int originalRingVolume = -1;
     private boolean volumesMuted = false;
+
+    private AttemptTiming currentTiming;
+
+    private static class AttemptTiming {
+        long nativeReceivedMs;
+        long nativeStartListeningMs;
+        long nativeReadyForSpeechMs;
+        long nativeBeginningOfSpeechMs;
+        long nativeFirstRmsAboveThresholdMs;
+        long nativeEndOfSpeechMs;
+        long nativeResultsMs;
+        long nativeErrorMs;
+        long nativeNormalizeDoneMs;
+        long nativeCallbackSentMs;
+
+        String expectedLetter;
+    }
 
     @Override
     public void initialize(CordovaInterface cordova, CordovaWebView webView) {
@@ -245,6 +263,12 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 currentCallback = callbackContext;
                 isListening = true;
 
+                AttemptTiming timing = new AttemptTiming();
+                timing.nativeReceivedMs = SystemClock.elapsedRealtime();
+                timing.expectedLetter = (args != null && args.length() > 0) ? args.optString(0, null) : null;
+                currentTiming = timing;
+                Log.d(TAG, "LimeTunaSpeech stage=received t=" + timing.nativeReceivedMs + " expected=" + timing.expectedLetter);
+
                 Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                         RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
@@ -256,11 +280,15 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
 
                 try {
+                    if (currentTiming != null) {
+                        currentTiming.nativeStartListeningMs = SystemClock.elapsedRealtime();
+                        Log.d(TAG, "LimeTunaSpeech stage=startListening t=" + currentTiming.nativeStartListeningMs);
+                    }
                     Log.d(TAG, "Calling startListening");
                     speechRecognizer.startListening(intent);
                 } catch (Exception e) {
                     Log.e(TAG, "startListening failed", e);
-                    sendErrorToCallback("START_FAILED", "Failed to start listening");
+                    sendErrorToCallback("START_FAILED", "Failed to start listening", currentTiming);
                 }
             }
         });
@@ -330,16 +358,27 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
     }
 
-    private void sendErrorToCallback(String code, String message) {
+    private void sendErrorToCallback(String code, String message, AttemptTiming timing) {
         if (currentCallback != null) {
-            currentCallback.error(buildErrorJson(code, message));
+            try {
+                if (timing != null) {
+                    timing.nativeErrorMs = SystemClock.elapsedRealtime();
+                    timing.nativeCallbackSentMs = timing.nativeErrorMs;
+                }
+                JSONObject obj = buildErrorJsonObject(code, message, timing);
+                currentCallback.error(obj.toString());
+            } catch (JSONException e) {
+                currentCallback.error(buildErrorJson(code, message));
+            }
             currentCallback = null;
         }
         isListening = false;
+        currentTiming = null;
     }
 
     private void sendSuccessToCallback(String text, Float confidence,
-                                       ArrayList<String> all, float[] confs) {
+                                       ArrayList<String> all, float[] confs,
+                                       AttemptTiming timing) {
 
         if (currentCallback != null) {
             try {
@@ -363,6 +402,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     json.put("allConfidences", confArr);
                 }
 
+                if (timing != null) {
+                    timing.nativeCallbackSentMs = SystemClock.elapsedRealtime();
+                    json.put("timing", buildTimingJson(timing));
+                }
+
                 currentCallback.success(json.toString());
             } catch (JSONException e) {
                 Log.e(TAG, "Error building success JSON", e);
@@ -373,6 +417,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
 
         isListening = false;
+        currentTiming = null;
     }
 
     private void stopListeningInternal(boolean cancel) {
@@ -395,16 +440,28 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     @Override
     public void onReadyForSpeech(Bundle params) {
         Log.d(TAG, "onReadyForSpeech");
+        if (currentTiming != null) {
+            currentTiming.nativeReadyForSpeechMs = SystemClock.elapsedRealtime();
+            Log.d(TAG, "LimeTunaSpeech stage=ready t=" + currentTiming.nativeReadyForSpeechMs);
+        }
     }
 
     @Override
     public void onBeginningOfSpeech() {
         Log.d(TAG, "onBeginningOfSpeech");
+        if (currentTiming != null) {
+            currentTiming.nativeBeginningOfSpeechMs = SystemClock.elapsedRealtime();
+            Log.d(TAG, "LimeTunaSpeech stage=begin_speech t=" + currentTiming.nativeBeginningOfSpeechMs);
+        }
     }
 
     @Override
     public void onRmsChanged(float rmsdB) {
         Log.v(TAG, "onRmsChanged: " + rmsdB);
+        if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && rmsdB > -2.0f) {
+            currentTiming.nativeFirstRmsAboveThresholdMs = SystemClock.elapsedRealtime();
+            Log.d(TAG, "LimeTunaSpeech stage=rms_threshold t=" + currentTiming.nativeFirstRmsAboveThresholdMs + " rmsdB=" + rmsdB);
+        }
     }
 
     @Override
@@ -415,6 +472,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     @Override
     public void onEndOfSpeech() {
         Log.d(TAG, "onEndOfSpeech");
+        if (currentTiming != null) {
+            currentTiming.nativeEndOfSpeechMs = SystemClock.elapsedRealtime();
+            Log.d(TAG, "LimeTunaSpeech stage=end_speech t=" + currentTiming.nativeEndOfSpeechMs);
+        }
     }
 
     @Override
@@ -423,6 +484,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         if (!isListening && currentCallback == null) {
             return;
+        }
+
+        if (currentTiming != null) {
+            currentTiming.nativeErrorMs = SystemClock.elapsedRealtime();
+            Log.d(TAG, "LimeTunaSpeech stage=error t=" + currentTiming.nativeErrorMs + " code=" + error);
         }
 
         String code;
@@ -441,7 +507,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 break;
         }
 
-        sendErrorToCallback(code, "Speech recognition error");
+        sendErrorToCallback(code, "Speech recognition error", currentTiming);
     }
 
     @Override
@@ -452,6 +518,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             return;
         }
 
+        if (currentTiming != null) {
+            currentTiming.nativeResultsMs = SystemClock.elapsedRealtime();
+            Log.d(TAG, "LimeTunaSpeech stage=results t=" + currentTiming.nativeResultsMs);
+        }
+
         ArrayList<String> matches =
                 results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         float[] confidences =
@@ -460,7 +531,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         Log.d(TAG, "matches=" + matches + " confidences=" + (confidences == null ? "null" : confidences.length));
 
         if (matches == null || matches.isEmpty()) {
-            sendErrorToCallback("NO_MATCH", "No recognition result");
+            sendErrorToCallback("NO_MATCH", "No recognition result", currentTiming);
             return;
         }
 
@@ -480,7 +551,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             bestConf = bestScore;
         }
 
-        sendSuccessToCallback(bestText, bestConf, matches, confidences);
+        if (currentTiming != null) {
+            currentTiming.nativeNormalizeDoneMs = SystemClock.elapsedRealtime();
+        }
+
+        sendSuccessToCallback(bestText, bestConf, matches, confidences, currentTiming);
     }
 
     @Override
@@ -571,8 +646,67 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
         currentCallback = null;
         isListening = false;
+        currentTiming = null;
 
         // Safety: restore volumes if we die while muted
         applyBeepsMuted(false);
+    }
+
+    private JSONObject buildErrorJsonObject(String code, String message, AttemptTiming timing) throws JSONException {
+        JSONObject err = new JSONObject();
+        err.put("code", code);
+        err.put("message", message);
+        if (timing != null) {
+            err.put("timing", buildTimingJson(timing));
+        }
+        return err;
+    }
+
+    private JSONObject buildTimingJson(AttemptTiming timing) throws JSONException {
+        JSONObject timingJson = new JSONObject();
+        JSONObject raw = new JSONObject();
+
+        putIfPositive(raw, "native_received_ms", timing.nativeReceivedMs);
+        putIfPositive(raw, "native_startListening_ms", timing.nativeStartListeningMs);
+        putIfPositive(raw, "native_readyForSpeech_ms", timing.nativeReadyForSpeechMs);
+        putIfPositive(raw, "native_beginningOfSpeech_ms", timing.nativeBeginningOfSpeechMs);
+        putIfPositive(raw, "native_firstRmsAboveThreshold_ms", timing.nativeFirstRmsAboveThresholdMs);
+        putIfPositive(raw, "native_endOfSpeech_ms", timing.nativeEndOfSpeechMs);
+        putIfPositive(raw, "native_results_ms", timing.nativeResultsMs);
+        putIfPositive(raw, "native_error_ms", timing.nativeErrorMs);
+        putIfPositive(raw, "native_normalize_done_ms", timing.nativeNormalizeDoneMs);
+        putIfPositive(raw, "native_callback_sent_ms", timing.nativeCallbackSentMs);
+
+        if (timing.expectedLetter != null) {
+            raw.put("expected_letter", timing.expectedLetter);
+        }
+
+        JSONObject durations = new JSONObject();
+        putDuration(durations, "d_queue_native_ms", timing.nativeStartListeningMs, timing.nativeReceivedMs);
+        putDuration(durations, "d_engine_ready_ms", timing.nativeReadyForSpeechMs, timing.nativeStartListeningMs);
+
+        long speechAnchorStart = timing.nativeReadyForSpeechMs > 0 ? timing.nativeReadyForSpeechMs : timing.nativeStartListeningMs;
+        long speechAnchorEnd = timing.nativeBeginningOfSpeechMs > 0 ? timing.nativeBeginningOfSpeechMs : timing.nativeFirstRmsAboveThresholdMs;
+        putDuration(durations, "d_user_speech_to_engine_ms", speechAnchorEnd, speechAnchorStart);
+
+        putDuration(durations, "d_engine_processing_ms", timing.nativeResultsMs, timing.nativeEndOfSpeechMs);
+        putDuration(durations, "d_normalize_ms", timing.nativeNormalizeDoneMs, timing.nativeResultsMs);
+
+        timingJson.put("native_raw", raw);
+        timingJson.put("native_durations", durations);
+
+        return timingJson;
+    }
+
+    private void putIfPositive(JSONObject obj, String key, long value) throws JSONException {
+        if (value > 0) {
+            obj.put(key, value);
+        }
+    }
+
+    private void putDuration(JSONObject obj, String key, long end, long start) throws JSONException {
+        if (end > 0 && start > 0 && end >= start) {
+            obj.put(key, end - start);
+        }
     }
 }

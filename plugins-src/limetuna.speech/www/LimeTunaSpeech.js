@@ -176,6 +176,7 @@ var LimeTunaSpeech = (function () {
           if (allResults.length === 0 && rawText) {
             allResults = [rawText];
           }
+          var timing = obj.timing || null;
 
           var normalizedLetter = chooseLetterFromResults(allResults, expectedLetter);
 
@@ -187,7 +188,8 @@ var LimeTunaSpeech = (function () {
             allResults: allResults,
             allConfidences: Array.isArray(obj.allConfidences)
               ? obj.allConfidences
-              : null
+              : null,
+            timing: timing
           };
 
           console.log("[LimeTunaSpeech] result:", result);
