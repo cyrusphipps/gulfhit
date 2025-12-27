@@ -128,6 +128,32 @@ function chooseLetterFromResults(allResults, expectedLetter) {
   return null;
 }
 
+function fallbackNormalizeLetter(rawText, expectedLetter) {
+  if (!rawText) return null;
+  const trimmed = rawText.trim();
+  if (!trimmed) return null;
+
+  const upperExpected = (expectedLetter || "").toUpperCase();
+
+  // If engine already returned a single-letter transcript, trust it.
+  if (trimmed.length === 1 && /[A-Z]/i.test(trimmed)) {
+    return trimmed.toUpperCase();
+  }
+
+  // If the transcript begins with the expected letter and is short, accept it.
+  if (upperExpected && trimmed.length <= 3 && trimmed[0].toUpperCase() === upperExpected) {
+    return upperExpected;
+  }
+
+  // If nothing else, try the very first letter of the transcript.
+  const firstLetter = trimmed[0];
+  if (firstLetter && /[A-Z]/i.test(firstLetter)) {
+    return firstLetter.toUpperCase();
+  }
+
+  return null;
+}
+
 var LimeTunaSpeech = (function () {
   var _opts = {
     language: "en-US"
@@ -197,6 +223,15 @@ var LimeTunaSpeech = (function () {
           var timing = obj.timing || null;
 
           var normalizedLetter = chooseLetterFromResults(allResults, expectedLetter);
+          if (!normalizedLetter) {
+            normalizedLetter = fallbackNormalizeLetter(rawText, expectedLetter);
+          }
+          if (!normalizedLetter) {
+            normalizedLetter = fallbackNormalizeLetter(rawText, expectedLetter);
+          }
+          if (!normalizedLetter) {
+            normalizedLetter = fallbackNormalizeLetter(rawText, expectedLetter);
+          }
 
           var result = {
             text: rawText,
@@ -216,7 +251,7 @@ var LimeTunaSpeech = (function () {
             onResult(result);
           }
         } catch (e) {
-          console.error("[LimeTunaSpeech] result parse error:", e);
+          console.error("[LimeTunaSpeech] result parse error:", e, nativePayload);
           if (typeof onError === "function") {
             onError(e);
           }
