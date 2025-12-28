@@ -71,6 +71,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private boolean stopIssued = false;
 
     private AttemptTiming currentTiming;
+    private long attemptCounter = 0L;
     private RmsStats rmsStats = new RmsStats();
     private long lastRmsDispatchMs = 0L;
     private static final long RMS_DISPATCH_INTERVAL_MS = 80L;
@@ -145,6 +146,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         long nativeCallbackSentMs;
 
         String expectedLetter;
+        long attemptId;
     }
 
     @Override
@@ -348,6 +350,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
+                timing.attemptId = ++attemptCounter;
                 timing.expectedLetter = (args != null && args.length() > 0) ? args.optString(0, null) : null;
                 currentTiming = timing;
                 Log.d(TAG, "LimeTunaSpeech stage=received t=" + timing.nativeReceivedMs + " expected=" + timing.expectedLetter);
@@ -368,6 +371,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                         Log.d(TAG, "LimeTunaSpeech stage=startListening t=" + currentTiming.nativeStartListeningMs);
                     }
                     Log.d(TAG, "Calling startListening");
+                    sendMilestoneEvent("startListening", null);
                     speechRecognizer.startListening(intent);
                 } catch (Exception e) {
                     Log.e(TAG, "startListening failed", e);
@@ -487,6 +491,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 }
 
                 if (timing != null) {
+                    json.put("attempt_id", timing.attemptId);
+                    if (timing.expectedLetter != null) {
+                        json.put("expected_letter", timing.expectedLetter);
+                    }
                     timing.nativeCallbackSentMs = SystemClock.elapsedRealtime();
                     json.put("timing", buildTimingJson(timing));
                 }
@@ -509,6 +517,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         cancelSilenceTimer(false);
 
         if (!stopIssued && speechRecognizer != null && isListening) {
+            sendMilestoneEvent("stop_listening", null);
             try {
                 if (cancel) {
                     speechRecognizer.cancel();
@@ -533,6 +542,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         if (currentTiming != null) {
             currentTiming.nativeReadyForSpeechMs = SystemClock.elapsedRealtime();
             Log.d(TAG, "LimeTunaSpeech stage=ready t=" + currentTiming.nativeReadyForSpeechMs);
+            sendMilestoneEvent("onReadyForSpeech", null);
         }
     }
 
@@ -544,6 +554,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             currentTiming.nativeBeginningOfSpeechMs = SystemClock.elapsedRealtime();
             ensureRmsSpeechStart(currentTiming.nativeBeginningOfSpeechMs);
             Log.d(TAG, "LimeTunaSpeech stage=begin_speech t=" + currentTiming.nativeBeginningOfSpeechMs);
+            sendMilestoneEvent("onBeginningOfSpeech", null);
         }
     }
 
@@ -622,6 +633,14 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         if (currentTiming != null) {
             currentTiming.nativeErrorMs = SystemClock.elapsedRealtime();
             Log.d(TAG, "LimeTunaSpeech stage=error t=" + currentTiming.nativeErrorMs + " code=" + error);
+            JSONObject extras = new JSONObject();
+            try {
+                extras.put("error_code", error);
+                extras.put("error_label", mapErrorLabel(error));
+            } catch (JSONException e) {
+                Log.w(TAG, "Failed to build error milestone extras", e);
+            }
+            sendMilestoneEvent("onError", extras);
         }
 
         String code;
@@ -791,6 +810,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         err.put("code", code);
         err.put("message", message);
         if (timing != null) {
+            err.put("attempt_id", timing.attemptId);
+            if (timing.expectedLetter != null) {
+                err.put("expected_letter", timing.expectedLetter);
+            }
             err.put("timing", buildTimingJson(timing));
         }
         return err;
@@ -875,6 +898,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
 
         cancelSpeechFailSafe();
+        sendMilestoneEvent("enter_silence_window", null);
 
         if (handler != null) {
             silenceTimeoutRunnable = new Runnable() {
@@ -929,6 +953,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     if (currentTiming != null && currentTiming.nativeFailSafeCommitMs == 0) {
                         currentTiming.nativeFailSafeCommitMs = now;
                     }
+                    sendMilestoneEvent("failsafe_commit", null);
                     stopListeningInternal(false);
                 }
             };
@@ -971,12 +996,76 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             if (!Float.isNaN(rmsStats.minRmsDb)) obj.put("min_rms_db", rmsStats.minRmsDb);
             if (!Float.isNaN(rmsStats.maxRmsDb)) obj.put("max_rms_db", rmsStats.maxRmsDb);
             obj.put("t_ms", now);
+            if (currentTiming != null) {
+                obj.put("attempt_id", currentTiming.attemptId);
+                if (currentTiming.expectedLetter != null) {
+                    obj.put("expected_letter", currentTiming.expectedLetter);
+                }
+            }
 
             PluginResult pr = new PluginResult(PluginResult.Status.OK, obj);
             pr.setKeepCallback(true);
             currentCallback.sendPluginResult(pr);
         } catch (JSONException e) {
             Log.w(TAG, "Failed to send RMS update", e);
+        }
+    }
+
+    private void sendMilestoneEvent(String stage, JSONObject extras) {
+        if (currentCallback == null || currentTiming == null) {
+            return;
+        }
+
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("type", "event");
+            obj.put("event", stage);
+            obj.put("attempt_id", currentTiming.attemptId);
+            if (currentTiming.expectedLetter != null) {
+                obj.put("expected_letter", currentTiming.expectedLetter);
+            }
+            obj.put("timing", buildTimingJson(currentTiming));
+            if (extras != null) {
+                JSONObject extrasCopy = new JSONObject(extras.toString());
+                obj.put("extras", extrasCopy);
+            }
+
+            PluginResult pr = new PluginResult(PluginResult.Status.OK, obj);
+            pr.setKeepCallback(true);
+            currentCallback.sendPluginResult(pr);
+        } catch (JSONException e) {
+            Log.w(TAG, "Failed to send milestone event " + stage, e);
+        }
+    }
+
+    private String mapErrorLabel(int error) {
+        switch (error) {
+            case SpeechRecognizer.ERROR_NO_MATCH:
+                return "ERROR_NO_MATCH";
+            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
+                return "ERROR_SPEECH_TIMEOUT";
+            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
+                return "ERROR_INSUFFICIENT_PERMISSIONS";
+            case SpeechRecognizer.ERROR_AUDIO:
+                return "ERROR_AUDIO";
+            case SpeechRecognizer.ERROR_NETWORK:
+                return "ERROR_NETWORK";
+            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
+                return "ERROR_NETWORK_TIMEOUT";
+            case SpeechRecognizer.ERROR_CLIENT:
+                return "ERROR_CLIENT";
+            case SpeechRecognizer.ERROR_SERVER:
+                return "ERROR_SERVER";
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+                return "ERROR_RECOGNIZER_BUSY";
+            case SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED:
+                return "ERROR_LANGUAGE_NOT_SUPPORTED";
+            case SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE:
+                return "ERROR_LANGUAGE_UNAVAILABLE";
+            case SpeechRecognizer.ERROR_SERVER_DISCONNECTED:
+                return "ERROR_SERVER_DISCONNECTED";
+            default:
+                return "ERROR_UNKNOWN_" + error;
         }
     }
 }
