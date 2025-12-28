@@ -156,7 +156,13 @@ var LimeTunaSpeech = (function () {
   /**
    * expectedLetter: single letter A–Z (upper or lower)
    */
-  function startLetter(expectedLetter, onResult, onError, onRmsUpdate) {
+  function startLetter(
+    expectedLetter,
+    onResult,
+    onError,
+    onRmsUpdate,
+    onDebugEvent
+  ) {
     if (!_initialized) {
       console.warn("[LimeTunaSpeech] startLetter called before init()");
     }
@@ -174,6 +180,14 @@ var LimeTunaSpeech = (function () {
           if (obj && obj.type === "rms") {
             if (typeof onRmsUpdate === "function") {
               onRmsUpdate(obj);
+            }
+            return;
+          }
+
+          if (obj && obj.type === "event") {
+            console.log("[LimeTunaSpeech] milestone:", obj);
+            if (typeof onDebugEvent === "function") {
+              onDebugEvent(obj);
             }
             return;
           }
@@ -196,7 +210,9 @@ var LimeTunaSpeech = (function () {
             allConfidences: Array.isArray(obj.allConfidences)
               ? obj.allConfidences
               : null,
-            timing: timing
+            timing: timing,
+            attemptId: typeof obj.attempt_id === "number" ? obj.attempt_id : null,
+            expectedLetter: obj.expected_letter || expectedLetter || null
           };
 
           console.log("[LimeTunaSpeech] result:", result);
