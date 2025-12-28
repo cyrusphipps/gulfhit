@@ -54,6 +54,7 @@ let postSilenceTimerId = null;
 let rmsPanelEl;
 let rmsNowEl;
 let rmsMinMaxEl;
+let speechDetectedForAttempt = false;
 const rmsDebugState = {
   timerId: null,
   active: false,
@@ -246,6 +247,7 @@ function setTimingIndicator(state) {
 function resetTimingIndicator() {
   clearPostSilenceTimer();
   setTimingIndicator("idle");
+  speechDetectedForAttempt = false;
 }
 
 // Temporary RMS debug helpers while tuning speech thresholds.
@@ -291,6 +293,15 @@ function handleNativeRmsUpdate(payload) {
   if (!payload || typeof payload.rms_db !== "number") return;
   const now = performance.now();
   rmsDebugState.lastDb = payload.rms_db;
+  if (
+    recognizing &&
+    !speechDetectedForAttempt &&
+    typeof currentThresholds.rmsVoiceTriggerDb === "number" &&
+    payload.rms_db >= currentThresholds.rmsVoiceTriggerDb
+  ) {
+    speechDetectedForAttempt = true;
+    setTimingIndicator("speech");
+  }
   if (typeof payload.avg_rms_db === "number") {
     rmsDebugState.avgDb = payload.avg_rms_db;
   }
@@ -604,9 +615,9 @@ function startListeningForCurrentLetter() {
   currentAttemptTiming = {
     js_start_ms: lastListenStartTs
   };
+  speechDetectedForAttempt = false;
   clearPostSilenceTimer();
   startRmsDebugSession();
-  setTimingIndicator("processing");
   statusEl.textContent =
     "Listening for speech (waiting for Android speech engine)…";
   console.log("[letters] stage=startListening", {
@@ -620,7 +631,6 @@ function startListeningForCurrentLetter() {
     },
     true
   );
-  setTimingIndicator("speech");
 
   LimeTunaSpeech.startLetter(
     expected,
@@ -630,6 +640,7 @@ function startListeningForCurrentLetter() {
       recordJsTiming("js_got_result_ms");
       enterPostSilenceWindow();
       stopRmsDebugSession();
+      speechDetectedForAttempt = false;
 
       recognizing = false;
 
@@ -713,6 +724,7 @@ function startListeningForCurrentLetter() {
       recordJsTiming("js_got_result_ms");
       enterPostSilenceWindow();
       stopRmsDebugSession();
+      speechDetectedForAttempt = false;
 
       const code = parseErrorCode(err);
       console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
@@ -745,9 +757,7 @@ function startListeningForCurrentLetter() {
         },
         true
       );
-      setTimeout(() => {
-        resetTimingIndicator();
-      }, 600);
+      resetTimingIndicator();
 
       if (isHardSttErrorCode(code)) {
         sttFatalError = true;
