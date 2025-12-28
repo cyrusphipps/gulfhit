@@ -41,10 +41,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private static final float RMS_VOICE_TRIGGER_DB = -2.0f;
 
     // Recognizer RMS values typically floor around -2 dB. Consider values
-    // >= 0 dB as the beginning of speech, and drop below 0 dB as silence.
-    private static final float RMS_START_THRESHOLD_DB = 0.0f;
-    private static final float RMS_END_THRESHOLD_DB = -0.5f;
-    private static final long POST_SILENCE_MS = 500L;
+    // >= ~3-4 dB as the beginning of speech, and drop below ~2-3 dB as silence.
+    private static final float RMS_START_THRESHOLD_DB = 3.5f;
+    private static final float RMS_END_THRESHOLD_DB = 2.5f;
+    private static final long POST_SILENCE_MS = 450L;
+    private static final long MAX_SPEECH_WINDOW_MS = 2300L;
 
     private SpeechRecognizer speechRecognizer;
     private CallbackContext currentCallback;
@@ -66,6 +67,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     private ListeningState listeningState = ListeningState.IDLE;
     private Runnable silenceTimeoutRunnable;
+    private Runnable speechFailSafeRunnable;
     private boolean stopIssued = false;
 
     private AttemptTiming currentTiming;
@@ -538,9 +540,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         listeningState = ListeningState.SPEECH;
         if (currentTiming != null) {
             currentTiming.nativeBeginningOfSpeechMs = SystemClock.elapsedRealtime();
-            if (currentTiming.nativeRmsSpeechStartMs == 0) {
-                currentTiming.nativeRmsSpeechStartMs = currentTiming.nativeBeginningOfSpeechMs;
-            }
+            ensureRmsSpeechStart(currentTiming.nativeBeginningOfSpeechMs);
             Log.d(TAG, "LimeTunaSpeech stage=begin_speech t=" + currentTiming.nativeBeginningOfSpeechMs);
         }
     }
@@ -563,9 +563,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             case IDLE:
                 if (rmsdB >= RMS_START_THRESHOLD_DB) {
                     listeningState = ListeningState.SPEECH;
-                    if (currentTiming != null && currentTiming.nativeRmsSpeechStartMs == 0) {
-                        currentTiming.nativeRmsSpeechStartMs = now;
-                    }
+                    ensureRmsSpeechStart(now);
                     cancelSilenceTimer(true);
                 }
                 break;
@@ -578,9 +576,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 if (rmsdB >= RMS_START_THRESHOLD_DB) {
                     cancelSilenceTimer(true);
                     listeningState = ListeningState.SPEECH;
-                    if (currentTiming != null && currentTiming.nativeRmsSpeechStartMs == 0) {
-                        currentTiming.nativeRmsSpeechStartMs = now;
-                    }
+                    ensureRmsSpeechStart(now);
                 }
                 break;
             }
@@ -843,6 +839,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         thresholds.put("rms_start_threshold_db", RMS_START_THRESHOLD_DB);
         thresholds.put("rms_end_threshold_db", RMS_END_THRESHOLD_DB);
         thresholds.put("post_silence_ms", POST_SILENCE_MS);
+        thresholds.put("max_speech_window_ms", MAX_SPEECH_WINDOW_MS);
 
         timingJson.put("native_raw", raw);
         timingJson.put("native_durations", durations);
@@ -873,6 +870,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             currentTiming.nativeRmsSpeechEndMs = now;
         }
 
+        cancelSpeechFailSafe();
+
         if (handler != null) {
             silenceTimeoutRunnable = new Runnable() {
                 @Override
@@ -881,6 +880,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                         return;
                     }
                     listeningState = ListeningState.COMMIT;
+                    cancelSpeechFailSafe();
                     stopListeningInternal(false);
                 }
             };
@@ -898,8 +898,44 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
     }
 
+    private void ensureRmsSpeechStart(long startMs) {
+        if (currentTiming != null && currentTiming.nativeRmsSpeechStartMs == 0) {
+            currentTiming.nativeRmsSpeechStartMs = startMs;
+            scheduleSpeechFailSafe(startMs);
+        }
+    }
+
+    private void scheduleSpeechFailSafe(long startMs) {
+        cancelSpeechFailSafe();
+        if (handler != null) {
+            speechFailSafeRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    if (stopIssued || listeningState == ListeningState.COMMIT) {
+                        return;
+                    }
+                    listeningState = ListeningState.COMMIT;
+                    long now = SystemClock.elapsedRealtime();
+                    if (currentTiming != null && currentTiming.nativeRmsSpeechEndMs == 0) {
+                        currentTiming.nativeRmsSpeechEndMs = now;
+                    }
+                    stopListeningInternal(false);
+                }
+            };
+            handler.postDelayed(speechFailSafeRunnable, MAX_SPEECH_WINDOW_MS);
+        }
+    }
+
+    private void cancelSpeechFailSafe() {
+        if (handler != null && speechFailSafeRunnable != null) {
+            handler.removeCallbacks(speechFailSafeRunnable);
+        }
+        speechFailSafeRunnable = null;
+    }
+
     private void resetListeningState() {
         cancelSilenceTimer(false);
+        cancelSpeechFailSafe();
         listeningState = ListeningState.IDLE;
         stopIssued = false;
     }
