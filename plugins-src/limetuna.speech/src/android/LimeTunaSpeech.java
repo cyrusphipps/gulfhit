@@ -279,11 +279,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 );
             }
             speechRecognizer.setRecognitionListener(this);
-            try {
-                ComponentName componentName = speechRecognizer.getComponentName();
-                Log.i(TAG, "SpeechRecognizer created with component=" + componentName);
-            } catch (Exception e) {
-                Log.i(TAG, "SpeechRecognizer created (component unavailable)", e);
+            if (recognizerServiceOverride != null) {
+                Log.i(TAG, "SpeechRecognizer created with override=" + recognizerServiceOverride);
+            } else {
+                Log.i(TAG, "SpeechRecognizer created using default service");
             }
         }
     }
