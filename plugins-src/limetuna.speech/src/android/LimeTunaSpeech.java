@@ -42,10 +42,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     // Recognizer RMS values typically floor around -2 dB. Consider values
     // >= ~3-4 dB as the beginning of speech, and drop below ~2-3 dB as silence.
-    private static final float RMS_START_THRESHOLD_DB = 3.5f;
-    private static final float RMS_END_THRESHOLD_DB = 2.5f;
-    private static final long POST_SILENCE_MS = 450L;
-    private static final long MAX_SPEECH_WINDOW_MS = 2300L;
+    private static final float RMS_START_THRESHOLD_DB = 3.4f;
+    private static final float RMS_END_THRESHOLD_DB = 2.4f;
+    private static final long POST_SILENCE_MS = 800L;
+    private static final long MAX_UTTERANCE_MS = 3300L;
 
     private SpeechRecognizer speechRecognizer;
     private CallbackContext currentCallback;
@@ -136,6 +136,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         long nativeFirstRmsAboveThresholdMs;
         long nativeRmsSpeechStartMs;
         long nativeRmsSpeechEndMs;
+        long nativePostSilenceCommitMs;
+        long nativeFailSafeCommitMs;
         long nativeEndOfSpeechMs;
         long nativeResultsMs;
         long nativeErrorMs;
@@ -805,6 +807,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         putIfPositive(raw, "native_firstRmsAboveThreshold_ms", timing.nativeFirstRmsAboveThresholdMs);
         putIfPositive(raw, "native_rmsSpeechStart_ms", timing.nativeRmsSpeechStartMs);
         putIfPositive(raw, "native_rmsSpeechEnd_ms", timing.nativeRmsSpeechEndMs);
+        putIfPositive(raw, "native_postSilenceCommit_ms", timing.nativePostSilenceCommitMs);
+        putIfPositive(raw, "native_failSafeCommit_ms", timing.nativeFailSafeCommitMs);
         putIfPositive(raw, "native_endOfSpeech_ms", timing.nativeEndOfSpeechMs);
         putIfPositive(raw, "native_results_ms", timing.nativeResultsMs);
         putIfPositive(raw, "native_error_ms", timing.nativeErrorMs);
@@ -839,7 +843,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         thresholds.put("rms_start_threshold_db", RMS_START_THRESHOLD_DB);
         thresholds.put("rms_end_threshold_db", RMS_END_THRESHOLD_DB);
         thresholds.put("post_silence_ms", POST_SILENCE_MS);
-        thresholds.put("max_speech_window_ms", MAX_SPEECH_WINDOW_MS);
+        thresholds.put("max_utterance_ms", MAX_UTTERANCE_MS);
 
         timingJson.put("native_raw", raw);
         timingJson.put("native_durations", durations);
@@ -881,6 +885,9 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     }
                     listeningState = ListeningState.COMMIT;
                     cancelSpeechFailSafe();
+                    if (currentTiming != null && currentTiming.nativePostSilenceCommitMs == 0) {
+                        currentTiming.nativePostSilenceCommitMs = SystemClock.elapsedRealtime();
+                    }
                     stopListeningInternal(false);
                 }
             };
@@ -919,10 +926,13 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     if (currentTiming != null && currentTiming.nativeRmsSpeechEndMs == 0) {
                         currentTiming.nativeRmsSpeechEndMs = now;
                     }
+                    if (currentTiming != null && currentTiming.nativeFailSafeCommitMs == 0) {
+                        currentTiming.nativeFailSafeCommitMs = now;
+                    }
                     stopListeningInternal(false);
                 }
             };
-            handler.postDelayed(speechFailSafeRunnable, MAX_SPEECH_WINDOW_MS);
+            handler.postDelayed(speechFailSafeRunnable, MAX_UTTERANCE_MS);
         }
     }
 
