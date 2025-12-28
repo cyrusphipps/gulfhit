@@ -13,7 +13,7 @@ const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const RMS_DISPLAY_INTERVAL_MS = 100;
 const RMS_STALE_MS = 550;
 const RMS_SHORT_WINDOW_MS = 350;
-const POST_SILENCE_MS = 500;
+const POST_SILENCE_MS = 1200;
 const LISTENING_WATCHDOG_MS = 8000;
 const NO_RMS_HINT_MS = 1500;
 
@@ -957,6 +957,16 @@ function startListeningForCurrentLetter() {
           true
         );
         resetTimingIndicator();
+
+        if (code === "NO_MATCH") {
+          statusEl.textContent = [
+            `No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms). Counting as incorrect.`,
+            engineBreakdownText,
+            `Timings: ${summaryText}`
+          ].join("\n");
+          handleIncorrect();
+          return;
+        }
 
         if (isHardSttErrorCode(code)) {
           sttFatalError = true;
