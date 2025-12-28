@@ -46,6 +46,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private static final float RMS_END_THRESHOLD_DB = 2.4f;
     private static final long POST_SILENCE_MS = 800L;
     private static final long MAX_UTTERANCE_MS = 3300L;
+    private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
 
     private SpeechRecognizer speechRecognizer;
     private CallbackContext currentCallback;
@@ -76,6 +77,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private long lastRmsDispatchMs = 0L;
     private static final long RMS_DISPATCH_INTERVAL_MS = 80L;
     private static final float RMS_AVG_ALPHA = 0.2f;
+    private boolean recognizerResetPending = false;
+    private int consecutiveZeroRmsWindows = 0;
 
     private enum ListeningState {
         IDLE,
@@ -186,6 +189,51 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
     }
 
+    private void rebuildRecognizerOnMainThread(String reason) {
+        Runnable rebuild = new Runnable() {
+            @Override
+            public void run() {
+                Log.w(TAG, "Rebuilding SpeechRecognizer reason=" + reason);
+                destroyRecognizer();
+                createRecognizerIfNeededOnMainThread();
+                recognizerResetPending = false;
+            }
+        };
+
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            rebuild.run();
+        } else if (handler != null) {
+            handler.post(rebuild);
+        }
+    }
+
+    private void requestRecognizerReset(String reason) {
+        requestRecognizerReset(reason, true);
+    }
+
+    private void requestRecognizerReset(String reason, boolean notifyCurrentAttempt) {
+        if (recognizerResetPending) {
+            return;
+        }
+        recognizerResetPending = true;
+        if (handler != null) {
+            handler.post(new Runnable() {
+                @Override
+                public void run() {
+                    if (isListening && currentCallback != null && notifyCurrentAttempt) {
+                        sendErrorToCallback("ENGINE_RESET", "Recognizer reset: " + reason, currentTiming);
+                    }
+                    rebuildRecognizerOnMainThread(reason);
+                }
+            });
+        } else {
+            if (isListening && currentCallback != null && notifyCurrentAttempt) {
+                sendErrorToCallback("ENGINE_RESET", "Recognizer reset: " + reason, currentTiming);
+            }
+            rebuildRecognizerOnMainThread(reason);
+        }
+    }
+
     // ---- Global beep muting --------------------------------------------------
 
     private void applyBeepsMuted(boolean mute) {
@@ -248,6 +296,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 return handleSetBeepsMuted(args, callbackContext);
             case "setKeepScreenOn":
                 return handleSetKeepScreenOn(args, callbackContext);
+            case "resetRecognizer":
+                return handleResetRecognizer(callbackContext);
             default:
                 return false;
         }
@@ -325,6 +375,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     return;
                 }
 
+                if (stopIssued || recognizerResetPending || speechRecognizer == null) {
+                    Log.w(TAG, "Preflight rebuild (stopIssued=" + stopIssued + ", pendingReset=" + recognizerResetPending + ")");
+                    rebuildRecognizerOnMainThread("start_preflight");
+                }
+
                 createRecognizerIfNeededOnMainThread();
                 if (speechRecognizer == null) {
                     callbackContext.error(buildErrorJson(
@@ -389,6 +444,24 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             public void run() {
                 stopListeningInternal(true);
                 callbackContext.success();
+            }
+        });
+        return true;
+    }
+
+    private boolean handleResetRecognizer(final CallbackContext callbackContext) {
+        cordova.getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                rebuildRecognizerOnMainThread("js_reset_request");
+                if (speechRecognizer != null) {
+                    callbackContext.success();
+                } else {
+                    callbackContext.error(buildErrorJson(
+                            "ENGINE_CREATE_FAILED",
+                            "Failed to reset SpeechRecognizer"
+                    ));
+                }
             }
         });
         return true;
@@ -601,6 +674,16 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         if (isListening) {
             sendRmsUpdateToCallback(rmsdB);
         }
+
+        if (rmsdB == 0f) {
+            consecutiveZeroRmsWindows++;
+            if (consecutiveZeroRmsWindows >= ZERO_RMS_STREAK_THRESHOLD && !recognizerResetPending) {
+                Log.w(TAG, "Zero-RMS streak detected; scheduling recognizer reset");
+                requestRecognizerReset("zero_rms_streak");
+            }
+        } else {
+            consecutiveZeroRmsWindows = 0;
+        }
     }
 
     @Override
@@ -653,6 +736,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 break;
             case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
                 code = "INSUFFICIENT_PERMISSIONS";
+                break;
+            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
+            case SpeechRecognizer.ERROR_CLIENT:
+                code = "ENGINE_RESTART_REQUIRED";
+                requestRecognizerReset(mapErrorLabel(error).toLowerCase(), false);
                 break;
             default:
                 code = "ERROR_" + error;
@@ -912,6 +1000,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     if (currentTiming != null && currentTiming.nativePostSilenceCommitMs == 0) {
                         currentTiming.nativePostSilenceCommitMs = SystemClock.elapsedRealtime();
                     }
+                    sendMilestoneEvent("post_silence_commit", buildCommitExtras("post_silence_commit"));
                     stopListeningInternal(false);
                 }
             };
@@ -953,7 +1042,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     if (currentTiming != null && currentTiming.nativeFailSafeCommitMs == 0) {
                         currentTiming.nativeFailSafeCommitMs = now;
                     }
-                    sendMilestoneEvent("failsafe_commit", null);
+                    sendMilestoneEvent("failsafe_commit", buildCommitExtras("max_utterance_commit"));
                     stopListeningInternal(false);
                 }
             };
@@ -973,6 +1062,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         cancelSpeechFailSafe();
         listeningState = ListeningState.IDLE;
         stopIssued = false;
+        consecutiveZeroRmsWindows = 0;
     }
 
     private void sendRmsUpdateToCallback(float rmsdB) {
@@ -1067,5 +1157,16 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             default:
                 return "ERROR_UNKNOWN_" + error;
         }
+    }
+
+    private JSONObject buildCommitExtras(String reason) {
+        JSONObject extras = new JSONObject();
+        try {
+            extras.put("commit_reason", reason);
+        } catch (JSONException e) {
+            Log.w(TAG, "Failed to build commit extras", e);
+            return null;
+        }
+        return extras;
     }
 }
