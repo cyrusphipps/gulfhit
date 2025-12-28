@@ -14,6 +14,7 @@ const RMS_DISPLAY_INTERVAL_MS = 100;
 const RMS_STALE_MS = 550;
 const RMS_SHORT_WINDOW_MS = 350;
 const POST_SILENCE_MS = 500;
+const LISTENING_WATCHDOG_MS = 8000;
 
 let LETTER_SEQUENCE = [];
 let currentIndex = 0;
@@ -60,6 +61,8 @@ let rmsShortAvgEl;
 let rmsSilenceStateEl;
 let rmsScaleEl;
 let speechDetectedForAttempt = false;
+let rmsSeenThisAttempt = false;
+let listeningWatchdogTimerId = null;
 const rmsDebugState = {
   timerId: null,
   active: false,
@@ -308,6 +311,7 @@ function handleNativeRmsUpdate(payload) {
   if (!payload || typeof payload.rms_db !== "number") return;
   const now = performance.now();
   rmsDebugState.lastDb = payload.rms_db;
+  rmsSeenThisAttempt = true;
   if (
     recognizing &&
     !speechDetectedForAttempt &&
@@ -534,6 +538,58 @@ function refreshTimingSummaryAfterAudio() {
   );
 }
 
+function clearListeningWatchdog() {
+  if (listeningWatchdogTimerId) {
+    clearTimeout(listeningWatchdogTimerId);
+    listeningWatchdogTimerId = null;
+  }
+}
+
+function handleNoSpeechDetected(expectedUpper) {
+  recognizing = false;
+  speechDetectedForAttempt = false;
+  stopRmsDebugSession();
+  clearPostSilenceTimer();
+  clearListeningWatchdog();
+
+  const thresholdText =
+    typeof currentThresholds.rmsVoiceTriggerDb === "number"
+      ? ` (speech trigger > ${currentThresholds.rmsVoiceTriggerDb} dB RMS)`
+      : "";
+  const summaryText = rmsSeenThisAttempt
+    ? `No speech above the trigger${thresholdText} was detected before timing out.`
+    : "Microphone did not report any audio levels before timing out.";
+  const statusLines = [
+    "No microphone input detected for this letter.",
+    rmsSeenThisAttempt
+      ? "We heard very low audio, but nothing crossed the speech trigger. Try moving closer to the mic or speaking louder."
+      : "We did not receive microphone levels. Please check microphone permissions or your device's input.",
+    "Retrying this letter…"
+  ];
+  if (expectedUpper) {
+    statusLines.unshift(`Listening for "${expectedUpper}" timed out.`);
+  }
+
+  statusEl.textContent = statusLines.join("\n");
+  updateTimingPanel(
+    {
+      stageText: "No speech detected; retrying…",
+      summaryText
+    },
+    true
+  );
+  resetTimingIndicator();
+  retryOrAdvance();
+}
+
+function startListeningWatchdog(expectedUpper) {
+  clearListeningWatchdog();
+  listeningWatchdogTimerId = setTimeout(() => {
+    if (!recognizing) return;
+    handleNoSpeechDetected(expectedUpper);
+  }, LISTENING_WATCHDOG_MS);
+}
+
 function startNewGame() {
   LETTER_SEQUENCE = shuffleArray(ALL_LETTERS).slice(0, 10);
   currentIndex = 0;
@@ -542,6 +598,7 @@ function startNewGame() {
   recognizing = false;
   sttFatalError = false;
   currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
+  clearListeningWatchdog();
   updateTimingPanel(
     {
       stageText: "Timing idle",
@@ -660,8 +717,10 @@ function startListeningForCurrentLetter() {
     js_start_ms: lastListenStartTs
   };
   speechDetectedForAttempt = false;
+  rmsSeenThisAttempt = false;
   clearPostSilenceTimer();
   startRmsDebugSession();
+  startListeningWatchdog(expected.toUpperCase());
   statusEl.textContent =
     "Listening for speech (waiting for Android speech engine)…";
   console.log("[letters] stage=startListening", {
@@ -679,6 +738,7 @@ function startListeningForCurrentLetter() {
   LimeTunaSpeech.startLetter(
     expected,
     function (result) {
+      clearListeningWatchdog();
       const resultArrivalTs = performance.now();
       const engineMs = resultArrivalTs - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
@@ -761,6 +821,7 @@ function startListeningForCurrentLetter() {
       }
     },
     function (err) {
+      clearListeningWatchdog();
       recognizing = false;
 
       const now = performance.now();
