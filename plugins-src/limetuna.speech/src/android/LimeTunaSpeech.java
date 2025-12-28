@@ -2,6 +2,7 @@ package com.limetuna.speech;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -45,8 +46,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     // Recognizer RMS values typically floor around -2 dB. Consider values
     // >= ~3-4 dB as the beginning of speech, and drop below ~2-3 dB as silence.
     private static final float RMS_START_THRESHOLD_DB = 3.4f;
-    private static final float RMS_END_THRESHOLD_DB = 2.4f;
-    private static final long POST_SILENCE_MS = 800L;
+    private static final float RMS_END_THRESHOLD_DB = 1.5f;
+    private static final long POST_SILENCE_MS = 1200L;
     private static final long MAX_UTTERANCE_MS = 3300L;
     private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
 
@@ -54,6 +55,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private CallbackContext currentCallback;
 
     private String language = "en-US";
+    private ComponentName recognizerServiceOverride = null;
 
     private Handler handler;
     private boolean isListening = false;
@@ -72,6 +74,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private Runnable silenceTimeoutRunnable;
     private Runnable speechFailSafeRunnable;
     private boolean stopIssued = false;
+    private ArrayList<String> lastPartialResults = null;
 
     private AttemptTiming currentTiming;
     private long attemptCounter = 0L;
@@ -265,10 +268,23 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 return;
             }
 
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(
-                    cordova.getActivity().getApplicationContext()
-            );
+            if (recognizerServiceOverride != null) {
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(
+                        cordova.getActivity().getApplicationContext(),
+                        recognizerServiceOverride
+                );
+            } else {
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(
+                        cordova.getActivity().getApplicationContext()
+                );
+            }
             speechRecognizer.setRecognitionListener(this);
+            try {
+                ComponentName componentName = speechRecognizer.getComponentName();
+                Log.i(TAG, "SpeechRecognizer created with component=" + componentName);
+            } catch (Exception e) {
+                Log.i(TAG, "SpeechRecognizer created (component unavailable)", e);
+            }
         }
     }
 
@@ -394,6 +410,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     language = opts.getString("language");
                 }
                 updateThresholdConfigFromOptions(opts);
+                updateRecognizerServiceFromOptions(opts);
             }
 
             if (!hasAudioPermission()) {
@@ -479,6 +496,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     return;
                 }
 
+                ThresholdConfig thresholds = thresholdConfig.get();
+
                 currentCallback = callbackContext;
                 isListening = true;
                 stopIssued = false;
@@ -486,6 +505,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 cancelSilenceTimer(true);
                 rmsStats.reset();
                 lastRmsDispatchMs = 0L;
+                lastPartialResults = null;
+                consecutiveZeroRmsWindows = 0;
 
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
@@ -498,11 +519,16 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
                         RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
                 intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language);
+                intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, language);
                 intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
                         cordova.getActivity().getPackageName());
                 intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 10);
                 intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
                 intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, thresholds.postSilenceMs);
+                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, Math.max(500L, thresholds.postSilenceMs / 2));
+                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L);
 
                 try {
                     if (currentTiming != null) {
@@ -616,6 +642,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
             currentCallback = null;
         }
+        lastPartialResults = null;
         isListening = false;
         resetListeningState();
         currentTiming = null;
@@ -811,6 +838,12 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             sendMilestoneEvent("onError", extras);
         }
 
+        if (error == SpeechRecognizer.ERROR_NO_MATCH && lastPartialResults != null && !lastPartialResults.isEmpty()) {
+            Log.i(TAG, "NO_MATCH with partials; emitting partial fallback result");
+            sendSuccessToCallback(lastPartialResults.get(0), null, new ArrayList<>(lastPartialResults), null, currentTiming);
+            return;
+        }
+
         String code;
         switch (error) {
             case SpeechRecognizer.ERROR_NO_MATCH:
@@ -855,6 +888,13 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         Log.d(TAG, "matches=" + matches + " confidences=" + (confidences == null ? "null" : confidences.length));
 
+        if ((matches == null || matches.isEmpty()) && lastPartialResults != null && !lastPartialResults.isEmpty()) {
+            Log.i(TAG, "Falling back to partial results: " + lastPartialResults);
+            matches = new ArrayList<>(lastPartialResults);
+            confidences = null;
+            sendMilestoneEvent("partial_fallback", null);
+        }
+
         if (matches == null || matches.isEmpty()) {
             sendErrorToCallback("NO_MATCH", "No recognition result", currentTiming);
             return;
@@ -885,7 +925,23 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     @Override
     public void onPartialResults(Bundle partialResults) {
-        // not used
+        if (!isListening && currentCallback == null) {
+            return;
+        }
+
+        ArrayList<String> partial =
+                partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+        if (partial != null && !partial.isEmpty()) {
+            lastPartialResults = new ArrayList<>(partial);
+            JSONObject extras = new JSONObject();
+            try {
+                extras.put("partial_size", partial.size());
+                extras.put("partial_top", partial.get(0));
+            } catch (JSONException e) {
+                Log.w(TAG, "Failed to build partial extras", e);
+            }
+            sendMilestoneEvent("partial_results", extras);
+        }
     }
 
     @Override
@@ -1301,5 +1357,25 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             return null;
         }
         return extras;
+    }
+
+    private void updateRecognizerServiceFromOptions(JSONObject opts) {
+        if (opts == null) return;
+
+        if (opts.has("recognizerService")) {
+            String candidate = opts.optString("recognizerService", "").trim();
+            if (candidate.isEmpty()) {
+                recognizerServiceOverride = null;
+                Log.i(TAG, "Recognizer service override cleared (empty string)");
+                return;
+            }
+            ComponentName cn = ComponentName.unflattenFromString(candidate);
+            if (cn != null) {
+                recognizerServiceOverride = cn;
+                Log.i(TAG, "Recognizer service override set to " + cn.flattenToShortString());
+            } else {
+                Log.w(TAG, "Invalid recognizerService override: " + candidate);
+            }
+        }
     }
 }
