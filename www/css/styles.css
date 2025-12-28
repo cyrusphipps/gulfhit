@@ -309,6 +309,37 @@ body {
   font-size: 0.95rem;
 }
 
+.timing-stage-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timing-indicator {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.03);
+}
+
+.timing-idle {
+  background: gray;
+}
+
+.timing-speech {
+  background: green;
+}
+
+.timing-silence {
+  background: gold;
+}
+
+.timing-processing {
+  background: red;
+}
+
 .timing-stage {
   font-weight: 700;
   margin-bottom: 4px;
