@@ -261,6 +261,26 @@ var LimeTunaSpeech = (function () {
     );
   }
 
+  /**
+   * Explicitly tear down and recreate the native SpeechRecognizer.
+   * Recommended retry flow when you see ENGINE_RESTART_REQUIRED or busy errors:
+   *   1) call resetRecognizer
+   *   2) then retry startLetter once reset completes
+   */
+  function resetRecognizer(onSuccess, onError) {
+    exec(
+      function () {
+        if (typeof onSuccess === "function") onSuccess();
+      },
+      function (err) {
+        if (typeof onError === "function") onError(err);
+      },
+      "LimeTunaSpeech",
+      "resetRecognizer",
+      []
+    );
+  }
+
   function setBeepsMuted(muted, onSuccess, onError) {
     exec(
       function () {
@@ -293,6 +313,7 @@ var LimeTunaSpeech = (function () {
     init: init,
     startLetter: startLetter,
     stop: stop,
+    resetRecognizer: resetRecognizer,
     setBeepsMuted: setBeepsMuted,
     setKeepScreenOn: setKeepScreenOn
   };
