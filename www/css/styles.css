@@ -350,6 +350,39 @@ body {
   line-height: 1.4;
 }
 
+/* Temporary RMS debug panel (remove when speech tuning completes) */
+.letters-rms-panel {
+  margin: 6px auto 10px;
+  padding: 8px 12px;
+  background: #f4f6fa;
+  border: 1px dashed #cfd6e4;
+  border-radius: var(--radius-medium);
+  text-align: left;
+  font-size: 0.92rem;
+  color: #2f3540;
+  transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.letters-rms-panel.rms-idle {
+  opacity: 0.6;
+  color: #6c737c;
+}
+
+.letters-rms-panel.rms-active {
+  opacity: 1;
+}
+
+.rms-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.rms-values {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .letters-controls {
   margin-top: 16px;
   display: flex;

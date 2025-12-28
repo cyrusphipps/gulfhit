@@ -10,6 +10,8 @@ const SPEECH_INDICATOR_THRESHOLDS = {
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
+const RMS_DISPLAY_INTERVAL_MS = 110;
+const RMS_STALE_MS = 550;
 
 let LETTER_SEQUENCE = [];
 let currentIndex = 0;
@@ -42,12 +44,25 @@ let timingPanelEl;
 let timingStageEl;
 let timingSummaryEl;
 let lastTimingRenderMs = 0;
+let lastRmsRenderMs = 0;
 let timingDisplayState = {
   stageText: "Timing idle",
   summaryText: "Timings will appear after you speak."
 };
 let timingIndicatorEl;
 let postSilenceTimerId = null;
+let rmsPanelEl;
+let rmsNowEl;
+let rmsMinMaxEl;
+const rmsDebugState = {
+  timerId: null,
+  active: false,
+  lastDb: null,
+  avgDb: null,
+  minDb: null,
+  maxDb: null,
+  lastUpdateMs: 0
+};
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -140,6 +155,9 @@ function initLettersGame() {
   timingStageEl = document.getElementById("timingStage");
   timingSummaryEl = document.getElementById("timingSummary");
   timingIndicatorEl = document.getElementById("timingIndicator");
+  rmsPanelEl = document.getElementById("lettersRmsPanel");
+  rmsNowEl = document.getElementById("rmsNow");
+  rmsMinMaxEl = document.getElementById("rmsMinMax");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -228,6 +246,96 @@ function setTimingIndicator(state) {
 function resetTimingIndicator() {
   clearPostSilenceTimer();
   setTimingIndicator("idle");
+}
+
+// Temporary RMS debug helpers while tuning speech thresholds.
+function resetRmsDebugState() {
+  if (rmsDebugState.timerId) {
+    clearInterval(rmsDebugState.timerId);
+    rmsDebugState.timerId = null;
+  }
+  rmsDebugState.active = false;
+  rmsDebugState.lastDb = null;
+  rmsDebugState.avgDb = null;
+  rmsDebugState.minDb = null;
+  rmsDebugState.maxDb = null;
+  rmsDebugState.lastUpdateMs = 0;
+  renderRmsPanel(true);
+}
+
+function startRmsDebugSession() {
+  resetRmsDebugState();
+  rmsDebugState.active = true;
+  if (rmsPanelEl) {
+    rmsPanelEl.classList.add("rms-active");
+    rmsPanelEl.classList.remove("rms-idle");
+  }
+  rmsDebugState.timerId = setInterval(() => renderRmsPanel(), RMS_DISPLAY_INTERVAL_MS);
+  renderRmsPanel(true);
+}
+
+function stopRmsDebugSession() {
+  if (rmsDebugState.timerId) {
+    clearInterval(rmsDebugState.timerId);
+    rmsDebugState.timerId = null;
+  }
+  rmsDebugState.active = false;
+  if (rmsPanelEl) {
+    rmsPanelEl.classList.add("rms-idle");
+    rmsPanelEl.classList.remove("rms-active");
+  }
+  renderRmsPanel(true);
+}
+
+function handleNativeRmsUpdate(payload) {
+  if (!payload || typeof payload.rms_db !== "number") return;
+  const now = performance.now();
+  rmsDebugState.lastDb = payload.rms_db;
+  if (typeof payload.avg_rms_db === "number") {
+    rmsDebugState.avgDb = payload.avg_rms_db;
+  }
+  const minCandidate = typeof payload.min_rms_db === "number" ? payload.min_rms_db : rmsDebugState.minDb;
+  const maxCandidate = typeof payload.max_rms_db === "number" ? payload.max_rms_db : rmsDebugState.maxDb;
+
+  if (typeof minCandidate === "number") {
+    rmsDebugState.minDb = typeof rmsDebugState.minDb === "number" ? Math.min(rmsDebugState.minDb, minCandidate) : minCandidate;
+  } else {
+    rmsDebugState.minDb = typeof rmsDebugState.lastDb === "number" ? rmsDebugState.lastDb : rmsDebugState.minDb;
+  }
+
+  if (typeof maxCandidate === "number") {
+    rmsDebugState.maxDb = typeof rmsDebugState.maxDb === "number" ? Math.max(rmsDebugState.maxDb, maxCandidate) : maxCandidate;
+  } else {
+    rmsDebugState.maxDb = typeof rmsDebugState.lastDb === "number" ? rmsDebugState.lastDb : rmsDebugState.maxDb;
+  }
+
+  rmsDebugState.lastUpdateMs = now;
+}
+
+function renderRmsPanel(force) {
+  if (!rmsPanelEl || !rmsNowEl || !rmsMinMaxEl) return;
+  const now = performance.now();
+  const isFresh = rmsDebugState.lastUpdateMs && now - rmsDebugState.lastUpdateMs < RMS_STALE_MS;
+  const isActive = rmsDebugState.active && isFresh;
+  const nowText =
+    typeof rmsDebugState.lastDb === "number" ? `${rmsDebugState.lastDb.toFixed(1)} dB` : "—";
+  const avgText =
+    typeof rmsDebugState.avgDb === "number" ? ` (avg ${rmsDebugState.avgDb.toFixed(1)} dB)` : "";
+  const minText =
+    typeof rmsDebugState.minDb === "number" ? `${rmsDebugState.minDb.toFixed(1)} dB` : "—";
+  const maxText =
+    typeof rmsDebugState.maxDb === "number" ? `${rmsDebugState.maxDb.toFixed(1)} dB` : "—";
+
+  rmsPanelEl.classList.toggle("rms-active", !!isActive);
+  rmsPanelEl.classList.toggle("rms-idle", !isActive);
+
+  if (!force && now - lastRmsRenderMs < RMS_DISPLAY_INTERVAL_MS) {
+    return;
+  }
+
+  rmsNowEl.textContent = `RMS now: ${nowText}${avgText}`;
+  rmsMinMaxEl.textContent = `Min/Max: ${minText} / ${maxText}`;
+  lastRmsRenderMs = now;
 }
 
 function enterPostSilenceWindow() {
@@ -387,6 +495,7 @@ function startNewGame() {
     true
   );
   resetTimingIndicator();
+  resetRmsDebugState();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -496,6 +605,7 @@ function startListeningForCurrentLetter() {
     js_start_ms: lastListenStartTs
   };
   clearPostSilenceTimer();
+  startRmsDebugSession();
   setTimingIndicator("processing");
   statusEl.textContent =
     "Listening for speech (waiting for Android speech engine)…";
@@ -519,6 +629,7 @@ function startListeningForCurrentLetter() {
       const engineMs = resultArrivalTs - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
       enterPostSilenceWindow();
+      stopRmsDebugSession();
 
       recognizing = false;
 
@@ -601,6 +712,7 @@ function startListeningForCurrentLetter() {
       const engineMs = now - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
       enterPostSilenceWindow();
+      stopRmsDebugSession();
 
       const code = parseErrorCode(err);
       console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
@@ -660,7 +772,8 @@ function startListeningForCurrentLetter() {
       ].join("\n");
 
       retryOrAdvance();
-    }
+    },
+    handleNativeRmsUpdate
   );
 }
 
