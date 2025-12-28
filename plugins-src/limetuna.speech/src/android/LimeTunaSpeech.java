@@ -33,6 +33,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     private static final String TAG = "LimeTunaSpeech";
     private static final int REQ_RECORD_AUDIO = 7001;
+    // Debug-only speech indicator thresholds. Keep these in sync with
+    // www/js/letters.js so we can retune or remove the indicator together.
+    // RMS_VOICE_TRIGGER_DB: first RMS level we count as "speech started" for
+    // timing indicator purposes (not an ASR gate).
+    private static final float RMS_VOICE_TRIGGER_DB = -2.0f;
 
     private SpeechRecognizer speechRecognizer;
     private CallbackContext currentCallback;
@@ -458,7 +463,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     @Override
     public void onRmsChanged(float rmsdB) {
         Log.v(TAG, "onRmsChanged: " + rmsdB);
-        if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && rmsdB > -2.0f) {
+        if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && rmsdB > RMS_VOICE_TRIGGER_DB) {
             currentTiming.nativeFirstRmsAboveThresholdMs = SystemClock.elapsedRealtime();
             Log.d(TAG, "LimeTunaSpeech stage=rms_threshold t=" + currentTiming.nativeFirstRmsAboveThresholdMs + " rmsdB=" + rmsdB);
         }
@@ -692,8 +697,12 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         putDuration(durations, "d_engine_processing_ms", timing.nativeResultsMs, timing.nativeEndOfSpeechMs);
         putDuration(durations, "d_normalize_ms", timing.nativeNormalizeDoneMs, timing.nativeResultsMs);
 
+        JSONObject thresholds = new JSONObject();
+        thresholds.put("rms_voice_trigger_db", RMS_VOICE_TRIGGER_DB);
+
         timingJson.put("native_raw", raw);
         timingJson.put("native_durations", durations);
+        timingJson.put("native_thresholds", thresholds);
 
         return timingJson;
     }

@@ -1,5 +1,12 @@
 // letters.js – debug timing + sound sequencing + beep-mute integration
 
+// Speech timing/indicator thresholds. Keep in sync with the native
+// LimeTunaSpeech constants so we can retune or delete the indicator in one go.
+// If the native timing payload includes overrides, we adopt them on the fly.
+const SPEECH_INDICATOR_THRESHOLDS = {
+  rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
+};
+
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
@@ -29,6 +36,7 @@ let soundLoseEl;
 // debug timing (to see where the delay is)
 let lastListenStartTs = 0;
 let currentAttemptTiming = null;
+let currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
 
 let timingPanelEl;
 let timingStageEl;
@@ -201,8 +209,26 @@ function describeStage(label, timestamp, originTs) {
 }
 
 function buildStageLines(timingPayload) {
+  const thresholds = timingPayload && timingPayload.native_thresholds
+    ? {
+        rmsVoiceTriggerDb:
+          typeof timingPayload.native_thresholds.rms_voice_trigger_db === "number"
+            ? timingPayload.native_thresholds.rms_voice_trigger_db
+            : currentThresholds.rmsVoiceTriggerDb
+      }
+    : currentThresholds;
+  const rmsLabel =
+    thresholds.rmsVoiceTriggerDb !== undefined && thresholds.rmsVoiceTriggerDb !== null
+      ? ` (>${thresholds.rmsVoiceTriggerDb} dB RMS)`
+      : "";
   if (!timingPayload || !timingPayload.native_raw) {
-    return ["Starting…", "Waiting for engine ready…", "Detected speech…", "Engine processing…", "Result received…"];
+    return [
+      "Starting…",
+      "Waiting for engine ready…",
+      `Detected speech${rmsLabel}…`,
+      "Engine processing…",
+      "Result received…"
+    ];
   }
   const raw = timingPayload.native_raw;
   const anchor = raw.native_received_ms || raw.native_startListening_ms || null;
@@ -210,7 +236,7 @@ function buildStageLines(timingPayload) {
     describeStage("Starting…", raw.native_startListening_ms, anchor || raw.native_received_ms),
     describeStage("Waiting for engine ready…", raw.native_readyForSpeech_ms, anchor || raw.native_startListening_ms),
     describeStage(
-      "Detected speech…",
+      `Detected speech${rmsLabel}…`,
       raw.native_beginningOfSpeech_ms || raw.native_firstRmsAboveThreshold_ms,
       raw.native_readyForSpeech_ms || anchor || raw.native_startListening_ms
     ),
@@ -277,6 +303,15 @@ function recordJsTiming(key) {
   currentAttemptTiming[key] = performance.now();
 }
 
+function updateCurrentThresholds(timingPayload) {
+  if (!timingPayload || !timingPayload.native_thresholds) return;
+
+  const { rms_voice_trigger_db } = timingPayload.native_thresholds;
+  if (typeof rms_voice_trigger_db === "number") {
+    currentThresholds.rmsVoiceTriggerDb = rms_voice_trigger_db;
+  }
+}
+
 function refreshTimingSummaryAfterAudio() {
   if (!currentAttemptTiming || !currentAttemptTiming.lastTimingPayload) return;
 
@@ -306,6 +341,7 @@ function startNewGame() {
   attemptCount = 0;
   recognizing = false;
   sttFatalError = false;
+  currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
   updateTimingPanel(
     {
       stageText: "Timing idle",
@@ -460,6 +496,7 @@ function startListeningForCurrentLetter() {
       if (currentAttemptTiming) {
         currentAttemptTiming.lastTimingPayload = timingPayload;
       }
+      updateCurrentThresholds(timingPayload);
 
       const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
       const jsDurations = {};
@@ -526,6 +563,7 @@ function startListeningForCurrentLetter() {
       if (currentAttemptTiming) {
         currentAttemptTiming.lastTimingPayload = timingPayload;
       }
+      updateCurrentThresholds(timingPayload);
       const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
       const jsDurations = {};
       if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
