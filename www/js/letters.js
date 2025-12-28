@@ -46,6 +46,8 @@ let timingDisplayState = {
   stageText: "Timing idle",
   summaryText: "Timings will appear after you speak."
 };
+let timingIndicatorEl;
+let postSilenceTimerId = null;
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -137,6 +139,7 @@ function initLettersGame() {
   timingPanelEl = document.getElementById("lettersTiming");
   timingStageEl = document.getElementById("timingStage");
   timingSummaryEl = document.getElementById("timingSummary");
+  timingIndicatorEl = document.getElementById("timingIndicator");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -200,6 +203,40 @@ function updateTimingPanel(partial, force) {
   timingStageEl.textContent = timingDisplayState.stageText || "";
   timingSummaryEl.textContent = timingDisplayState.summaryText || "";
   lastTimingRenderMs = now;
+}
+
+function clearPostSilenceTimer() {
+  if (postSilenceTimerId) {
+    clearTimeout(postSilenceTimerId);
+    postSilenceTimerId = null;
+  }
+}
+
+function setTimingIndicator(state) {
+  if (!timingIndicatorEl) return;
+  const states = ["timing-idle", "timing-speech", "timing-silence", "timing-processing"];
+  timingIndicatorEl.classList.remove(...states);
+
+  let className = "timing-idle";
+  if (state === "speech") className = "timing-speech";
+  else if (state === "silence") className = "timing-silence";
+  else if (state === "processing") className = "timing-processing";
+
+  timingIndicatorEl.classList.add(className);
+}
+
+function resetTimingIndicator() {
+  clearPostSilenceTimer();
+  setTimingIndicator("idle");
+}
+
+function enterPostSilenceWindow() {
+  clearPostSilenceTimer();
+  setTimingIndicator("silence");
+  postSilenceTimerId = setTimeout(() => {
+    setTimingIndicator("processing");
+    postSilenceTimerId = null;
+  }, 500);
 }
 
 function describeStage(label, timestamp, originTs) {
@@ -349,6 +386,7 @@ function startNewGame() {
     },
     true
   );
+  resetTimingIndicator();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -419,6 +457,7 @@ function startNewGame() {
 
 function updateUIForCurrentLetter() {
   attemptCount = 0;
+  resetTimingIndicator();
 
   const total = LETTER_SEQUENCE.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -436,6 +475,7 @@ function startListeningForCurrentLetter() {
   if (!sttEnabled || sttFatalError) {
     console.warn("STT disabled or fatal; not listening.");
     statusEl.textContent = "Speech engine not available.";
+    resetTimingIndicator();
     return;
   }
 
@@ -455,6 +495,8 @@ function startListeningForCurrentLetter() {
   currentAttemptTiming = {
     js_start_ms: lastListenStartTs
   };
+  clearPostSilenceTimer();
+  setTimingIndicator("processing");
   statusEl.textContent =
     "Listening for speech (waiting for Android speech engine)…";
   console.log("[letters] stage=startListening", {
@@ -468,6 +510,7 @@ function startListeningForCurrentLetter() {
     },
     true
   );
+  setTimingIndicator("speech");
 
   LimeTunaSpeech.startLetter(
     expected,
@@ -475,6 +518,7 @@ function startListeningForCurrentLetter() {
       const resultArrivalTs = performance.now();
       const engineMs = resultArrivalTs - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
+      enterPostSilenceWindow();
 
       recognizing = false;
 
@@ -556,6 +600,7 @@ function startListeningForCurrentLetter() {
       const now = performance.now();
       const engineMs = now - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
+      enterPostSilenceWindow();
 
       const code = parseErrorCode(err);
       console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
@@ -588,6 +633,9 @@ function startListeningForCurrentLetter() {
         },
         true
       );
+      setTimeout(() => {
+        resetTimingIndicator();
+      }, 600);
 
       if (isHardSttErrorCode(code)) {
         sttFatalError = true;
@@ -696,6 +744,7 @@ function advanceToNextLetter(options) {
 }
 
 function endGame() {
+  resetTimingIndicator();
   const total = LETTER_SEQUENCE.length;
   statusEl.textContent =
     "Game over.\n" + `You got ${correctCount} out of ${total} letters right.`;
