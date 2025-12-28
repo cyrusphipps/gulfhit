@@ -383,6 +383,11 @@ body {
   gap: 2px;
 }
 
+.rms-note {
+  color: #6c737c;
+  font-size: 0.85rem;
+}
+
 .letters-controls {
   margin-top: 16px;
   display: flex;

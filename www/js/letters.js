@@ -10,8 +10,10 @@ const SPEECH_INDICATOR_THRESHOLDS = {
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
-const RMS_DISPLAY_INTERVAL_MS = 110;
+const RMS_DISPLAY_INTERVAL_MS = 100;
 const RMS_STALE_MS = 550;
+const RMS_SHORT_WINDOW_MS = 350;
+const POST_SILENCE_MS = 500;
 
 let LETTER_SEQUENCE = [];
 let currentIndex = 0;
@@ -54,6 +56,9 @@ let postSilenceTimerId = null;
 let rmsPanelEl;
 let rmsNowEl;
 let rmsMinMaxEl;
+let rmsShortAvgEl;
+let rmsSilenceStateEl;
+let rmsScaleEl;
 let speechDetectedForAttempt = false;
 const rmsDebugState = {
   timerId: null,
@@ -62,8 +67,11 @@ const rmsDebugState = {
   avgDb: null,
   minDb: null,
   maxDb: null,
-  lastUpdateMs: 0
+  lastUpdateMs: 0,
+  shortSamples: [],
+  shortAvgDb: null
 };
+let postSilenceDeadlineMs = null;
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -159,6 +167,9 @@ function initLettersGame() {
   rmsPanelEl = document.getElementById("lettersRmsPanel");
   rmsNowEl = document.getElementById("rmsNow");
   rmsMinMaxEl = document.getElementById("rmsMinMax");
+  rmsShortAvgEl = document.getElementById("rmsShortAvg");
+  rmsSilenceStateEl = document.getElementById("rmsSilenceState");
+  rmsScaleEl = document.getElementById("rmsScaleNote");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -229,6 +240,7 @@ function clearPostSilenceTimer() {
     clearTimeout(postSilenceTimerId);
     postSilenceTimerId = null;
   }
+  postSilenceDeadlineMs = null;
 }
 
 function setTimingIndicator(state) {
@@ -262,6 +274,9 @@ function resetRmsDebugState() {
   rmsDebugState.minDb = null;
   rmsDebugState.maxDb = null;
   rmsDebugState.lastUpdateMs = 0;
+  rmsDebugState.shortSamples = [];
+  rmsDebugState.shortAvgDb = null;
+  postSilenceDeadlineMs = null;
   renderRmsPanel(true);
 }
 
@@ -305,6 +320,14 @@ function handleNativeRmsUpdate(payload) {
   if (typeof payload.avg_rms_db === "number") {
     rmsDebugState.avgDb = payload.avg_rms_db;
   }
+  rmsDebugState.shortSamples.push({ ts: now, db: payload.rms_db });
+  while (rmsDebugState.shortSamples.length && now - rmsDebugState.shortSamples[0].ts > RMS_SHORT_WINDOW_MS) {
+    rmsDebugState.shortSamples.shift();
+  }
+  if (rmsDebugState.shortSamples.length) {
+    const sum = rmsDebugState.shortSamples.reduce((acc, item) => acc + item.db, 0);
+    rmsDebugState.shortAvgDb = sum / rmsDebugState.shortSamples.length;
+  }
   const minCandidate = typeof payload.min_rms_db === "number" ? payload.min_rms_db : rmsDebugState.minDb;
   const maxCandidate = typeof payload.max_rms_db === "number" ? payload.max_rms_db : rmsDebugState.maxDb;
 
@@ -332,10 +355,20 @@ function renderRmsPanel(force) {
     typeof rmsDebugState.lastDb === "number" ? `${rmsDebugState.lastDb.toFixed(1)} dB` : "—";
   const avgText =
     typeof rmsDebugState.avgDb === "number" ? ` (avg ${rmsDebugState.avgDb.toFixed(1)} dB)` : "";
+  const shortAvgText =
+    typeof rmsDebugState.shortAvgDb === "number" ? `${rmsDebugState.shortAvgDb.toFixed(1)} dB (short)` : "—";
   const minText =
     typeof rmsDebugState.minDb === "number" ? `${rmsDebugState.minDb.toFixed(1)} dB` : "—";
   const maxText =
     typeof rmsDebugState.maxDb === "number" ? `${rmsDebugState.maxDb.toFixed(1)} dB` : "—";
+  let silenceText = "Silence window: idle";
+  if (postSilenceTimerId || postSilenceDeadlineMs) {
+    const remaining = Math.max(0, (postSilenceDeadlineMs || now) - now);
+    silenceText = `Silence window: waiting (~${Math.round(remaining)} ms to commit)`;
+  }
+  if (timingIndicatorEl && timingIndicatorEl.classList.contains("timing-processing")) {
+    silenceText = "Silence window: processing";
+  }
 
   rmsPanelEl.classList.toggle("rms-active", !!isActive);
   rmsPanelEl.classList.toggle("rms-idle", !isActive);
@@ -346,16 +379,27 @@ function renderRmsPanel(force) {
 
   rmsNowEl.textContent = `RMS now: ${nowText}${avgText}`;
   rmsMinMaxEl.textContent = `Min/Max: ${minText} / ${maxText}`;
+  if (rmsShortAvgEl) {
+    rmsShortAvgEl.textContent = `Short avg: ${shortAvgText}`;
+  }
+  if (rmsSilenceStateEl) {
+    rmsSilenceStateEl.textContent = silenceText;
+  }
+  if (rmsScaleEl) {
+    rmsScaleEl.textContent = "Scale: approx −2…10 dB";
+  }
   lastRmsRenderMs = now;
 }
 
 function enterPostSilenceWindow() {
   clearPostSilenceTimer();
   setTimingIndicator("silence");
+  postSilenceDeadlineMs = performance.now() + POST_SILENCE_MS;
   postSilenceTimerId = setTimeout(() => {
     setTimingIndicator("processing");
+    postSilenceDeadlineMs = null;
     postSilenceTimerId = null;
-  }, 500);
+  }, POST_SILENCE_MS);
 }
 
 function describeStage(label, timestamp, originTs) {
