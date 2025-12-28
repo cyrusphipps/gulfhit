@@ -1,5 +1,12 @@
 // letters.js – debug timing + sound sequencing + beep-mute integration
 
+// Speech timing/indicator thresholds. Keep in sync with the native
+// LimeTunaSpeech constants so we can retune or delete the indicator in one go.
+// If the native timing payload includes overrides, we adopt them on the fly.
+const SPEECH_INDICATOR_THRESHOLDS = {
+  rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
+};
+
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
@@ -29,6 +36,7 @@ let soundLoseEl;
 // debug timing (to see where the delay is)
 let lastListenStartTs = 0;
 let currentAttemptTiming = null;
+let currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
 
 let timingPanelEl;
 let timingStageEl;
@@ -38,6 +46,8 @@ let timingDisplayState = {
   stageText: "Timing idle",
   summaryText: "Timings will appear after you speak."
 };
+let timingIndicatorEl;
+let postSilenceTimerId = null;
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -129,6 +139,7 @@ function initLettersGame() {
   timingPanelEl = document.getElementById("lettersTiming");
   timingStageEl = document.getElementById("timingStage");
   timingSummaryEl = document.getElementById("timingSummary");
+  timingIndicatorEl = document.getElementById("timingIndicator");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -194,6 +205,40 @@ function updateTimingPanel(partial, force) {
   lastTimingRenderMs = now;
 }
 
+function clearPostSilenceTimer() {
+  if (postSilenceTimerId) {
+    clearTimeout(postSilenceTimerId);
+    postSilenceTimerId = null;
+  }
+}
+
+function setTimingIndicator(state) {
+  if (!timingIndicatorEl) return;
+  const states = ["timing-idle", "timing-speech", "timing-silence", "timing-processing"];
+  timingIndicatorEl.classList.remove(...states);
+
+  let className = "timing-idle";
+  if (state === "speech") className = "timing-speech";
+  else if (state === "silence") className = "timing-silence";
+  else if (state === "processing") className = "timing-processing";
+
+  timingIndicatorEl.classList.add(className);
+}
+
+function resetTimingIndicator() {
+  clearPostSilenceTimer();
+  setTimingIndicator("idle");
+}
+
+function enterPostSilenceWindow() {
+  clearPostSilenceTimer();
+  setTimingIndicator("silence");
+  postSilenceTimerId = setTimeout(() => {
+    setTimingIndicator("processing");
+    postSilenceTimerId = null;
+  }, 500);
+}
+
 function describeStage(label, timestamp, originTs) {
   if (!timestamp || !originTs) return `${label} …`;
   const delta = timestamp - originTs;
@@ -201,8 +246,26 @@ function describeStage(label, timestamp, originTs) {
 }
 
 function buildStageLines(timingPayload) {
+  const thresholds = timingPayload && timingPayload.native_thresholds
+    ? {
+        rmsVoiceTriggerDb:
+          typeof timingPayload.native_thresholds.rms_voice_trigger_db === "number"
+            ? timingPayload.native_thresholds.rms_voice_trigger_db
+            : currentThresholds.rmsVoiceTriggerDb
+      }
+    : currentThresholds;
+  const rmsLabel =
+    thresholds.rmsVoiceTriggerDb !== undefined && thresholds.rmsVoiceTriggerDb !== null
+      ? ` (>${thresholds.rmsVoiceTriggerDb} dB RMS)`
+      : "";
   if (!timingPayload || !timingPayload.native_raw) {
-    return ["Starting…", "Waiting for engine ready…", "Detected speech…", "Engine processing…", "Result received…"];
+    return [
+      "Starting…",
+      "Waiting for engine ready…",
+      `Detected speech${rmsLabel}…`,
+      "Engine processing…",
+      "Result received…"
+    ];
   }
   const raw = timingPayload.native_raw;
   const anchor = raw.native_received_ms || raw.native_startListening_ms || null;
@@ -210,7 +273,7 @@ function buildStageLines(timingPayload) {
     describeStage("Starting…", raw.native_startListening_ms, anchor || raw.native_received_ms),
     describeStage("Waiting for engine ready…", raw.native_readyForSpeech_ms, anchor || raw.native_startListening_ms),
     describeStage(
-      "Detected speech…",
+      `Detected speech${rmsLabel}…`,
       raw.native_beginningOfSpeech_ms || raw.native_firstRmsAboveThreshold_ms,
       raw.native_readyForSpeech_ms || anchor || raw.native_startListening_ms
     ),
@@ -277,6 +340,15 @@ function recordJsTiming(key) {
   currentAttemptTiming[key] = performance.now();
 }
 
+function updateCurrentThresholds(timingPayload) {
+  if (!timingPayload || !timingPayload.native_thresholds) return;
+
+  const { rms_voice_trigger_db } = timingPayload.native_thresholds;
+  if (typeof rms_voice_trigger_db === "number") {
+    currentThresholds.rmsVoiceTriggerDb = rms_voice_trigger_db;
+  }
+}
+
 function refreshTimingSummaryAfterAudio() {
   if (!currentAttemptTiming || !currentAttemptTiming.lastTimingPayload) return;
 
@@ -306,6 +378,7 @@ function startNewGame() {
   attemptCount = 0;
   recognizing = false;
   sttFatalError = false;
+  currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
   updateTimingPanel(
     {
       stageText: "Timing idle",
@@ -313,6 +386,7 @@ function startNewGame() {
     },
     true
   );
+  resetTimingIndicator();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -383,6 +457,7 @@ function startNewGame() {
 
 function updateUIForCurrentLetter() {
   attemptCount = 0;
+  resetTimingIndicator();
 
   const total = LETTER_SEQUENCE.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -400,6 +475,7 @@ function startListeningForCurrentLetter() {
   if (!sttEnabled || sttFatalError) {
     console.warn("STT disabled or fatal; not listening.");
     statusEl.textContent = "Speech engine not available.";
+    resetTimingIndicator();
     return;
   }
 
@@ -419,6 +495,8 @@ function startListeningForCurrentLetter() {
   currentAttemptTiming = {
     js_start_ms: lastListenStartTs
   };
+  clearPostSilenceTimer();
+  setTimingIndicator("processing");
   statusEl.textContent =
     "Listening for speech (waiting for Android speech engine)…";
   console.log("[letters] stage=startListening", {
@@ -432,6 +510,7 @@ function startListeningForCurrentLetter() {
     },
     true
   );
+  setTimingIndicator("speech");
 
   LimeTunaSpeech.startLetter(
     expected,
@@ -439,6 +518,7 @@ function startListeningForCurrentLetter() {
       const resultArrivalTs = performance.now();
       const engineMs = resultArrivalTs - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
+      enterPostSilenceWindow();
 
       recognizing = false;
 
@@ -460,6 +540,7 @@ function startListeningForCurrentLetter() {
       if (currentAttemptTiming) {
         currentAttemptTiming.lastTimingPayload = timingPayload;
       }
+      updateCurrentThresholds(timingPayload);
 
       const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
       const jsDurations = {};
@@ -519,6 +600,7 @@ function startListeningForCurrentLetter() {
       const now = performance.now();
       const engineMs = now - lastListenStartTs;
       recordJsTiming("js_got_result_ms");
+      enterPostSilenceWindow();
 
       const code = parseErrorCode(err);
       console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
@@ -526,6 +608,7 @@ function startListeningForCurrentLetter() {
       if (currentAttemptTiming) {
         currentAttemptTiming.lastTimingPayload = timingPayload;
       }
+      updateCurrentThresholds(timingPayload);
       const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
       const jsDurations = {};
       if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
@@ -550,6 +633,9 @@ function startListeningForCurrentLetter() {
         },
         true
       );
+      setTimeout(() => {
+        resetTimingIndicator();
+      }, 600);
 
       if (isHardSttErrorCode(code)) {
         sttFatalError = true;
@@ -658,6 +744,7 @@ function advanceToNextLetter(options) {
 }
 
 function endGame() {
+  resetTimingIndicator();
   const total = LETTER_SEQUENCE.length;
   statusEl.textContent =
     "Game over.\n" + `You got ${correctCount} out of ${total} letters right.`;

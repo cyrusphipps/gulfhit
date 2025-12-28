@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Gulfhit 1.0.1 · Letters</title>
+  <title>Gulfhit 1.0.3 · Letters</title>
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
@@ -19,7 +19,7 @@
 <body>
   <div id="lettersApp" class="letters-app">
     <header class="app-header">
-      <h1 class="app-title">Gulfhit 1.0.1</h1>
+      <h1 class="app-title">Gulfhit 1.0.3</h1>
       <p class="app-subtitle">Letters game – say the letter</p>
     </header>
 
@@ -38,7 +38,10 @@
         </div>
 
         <div class="letters-timing-panel" id="lettersTiming">
-          <div class="timing-stage" id="timingStage">Timing idle</div>
+          <div class="timing-stage-row">
+            <div id="timingIndicator" class="timing-indicator timing-idle"></div>
+            <div class="timing-stage" id="timingStage">Timing idle</div>
+          </div>
           <div class="timing-summary" id="timingSummary">Timings will appear after you speak.</div>
         </div>
 
