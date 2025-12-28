@@ -133,9 +133,78 @@ var LimeTunaSpeech = (function () {
     language: "en-US"
   };
   var _initialized = false;
+  var _attemptRmsHistory = new Map();
+  var _attemptThresholdLogged = new Set();
+  var RMS_HISTORY_LIMIT = 40;
+
+  function formatRms(value) {
+    return typeof value === "number" ? value.toFixed(2) : String(value);
+  }
+
+  function recordRmsSample(attemptId, value) {
+    if (attemptId === null || attemptId === undefined) return;
+    var samples = _attemptRmsHistory.get(attemptId) || [];
+    samples.push(value);
+    if (samples.length > RMS_HISTORY_LIMIT) {
+      samples.shift();
+    }
+    _attemptRmsHistory.set(attemptId, samples);
+  }
+
+  function logThresholdsForAttempt(evt) {
+    var attemptId = evt && typeof evt.attempt_id === "number" ? evt.attempt_id : null;
+    var thresholds = evt && evt.timing && evt.timing.native_thresholds;
+    if (!attemptId || !thresholds) return;
+    if (_attemptThresholdLogged.has(attemptId)) return;
+    _attemptThresholdLogged.add(attemptId);
+    console.info(
+      "[LimeTunaSpeech] attempt " + attemptId +
+      " thresholds start=" + thresholds.rms_start_threshold_db +
+      " end=" + thresholds.rms_end_threshold_db +
+      " postSilenceMs=" + thresholds.post_silence_ms +
+      " maxUtteranceMs=" + thresholds.max_utterance_ms +
+      " baseline=" + (thresholds.baseline_rms_db !== undefined ? thresholds.baseline_rms_db : "n/a")
+    );
+  }
+
+  function logCommitDebug(evt) {
+    var extras = evt && evt.extras ? evt.extras : {};
+    var attemptId = evt && typeof evt.attempt_id === "number" ? evt.attempt_id : null;
+    if (!attemptId) return;
+    if (!extras.commit_reason && !(evt && typeof evt.event === "string" && evt.event.indexOf("commit") !== -1)) {
+      return;
+    }
+    var thresholds = evt && evt.timing && evt.timing.native_thresholds ? evt.timing.native_thresholds : {};
+    var tail = Array.isArray(extras.rms_tail)
+      ? extras.rms_tail.slice()
+      : (_attemptRmsHistory.get(attemptId) || []).slice();
+    var formattedTail = tail.map(formatRms).join(", ");
+    console.log(
+      "[LimeTunaSpeech][debug] attempt " + attemptId +
+      " commit=" + (extras.commit_reason || evt.event || "unknown") +
+      " tail=[" + formattedTail + "]" +
+      " baseline=" + (thresholds.baseline_rms_db !== undefined ? thresholds.baseline_rms_db : "n/a") +
+      " start=" + thresholds.rms_start_threshold_db +
+      " end=" + thresholds.rms_end_threshold_db +
+      " postSilenceMs=" + thresholds.post_silence_ms +
+      " maxUtteranceMs=" + thresholds.max_utterance_ms
+    );
+  }
+
+  function cleanupAttempt(attemptId) {
+    if (attemptId === null || attemptId === undefined) return;
+    _attemptRmsHistory.delete(attemptId);
+    _attemptThresholdLogged.delete(attemptId);
+  }
 
   function init(options, onSuccess, onError) {
     _opts = Object.assign({}, _opts, options || {});
+    var sanitizedOpts = Object.assign({}, _opts);
+    Object.keys(sanitizedOpts).forEach(function (key) {
+      if (sanitizedOpts[key] === undefined || sanitizedOpts[key] === null) {
+        delete sanitizedOpts[key];
+      }
+    });
 
     exec(
       function () {
@@ -149,7 +218,7 @@ var LimeTunaSpeech = (function () {
       },
       "LimeTunaSpeech",
       "init",
-      [_opts]
+      [sanitizedOpts]
     );
   }
 
@@ -181,11 +250,16 @@ var LimeTunaSpeech = (function () {
             if (typeof onRmsUpdate === "function") {
               onRmsUpdate(obj);
             }
+            if (typeof obj.attempt_id === "number") {
+              recordRmsSample(obj.attempt_id, obj.rms_db);
+            }
             return;
           }
 
           if (obj && obj.type === "event") {
             console.log("[LimeTunaSpeech] milestone:", obj);
+            logThresholdsForAttempt(obj);
+            logCommitDebug(obj);
             if (typeof onDebugEvent === "function") {
               onDebugEvent(obj);
             }
@@ -220,6 +294,9 @@ var LimeTunaSpeech = (function () {
           if (typeof onResult === "function") {
             onResult(result);
           }
+          if (result.attemptId !== null) {
+            cleanupAttempt(result.attemptId);
+          }
         } catch (e) {
           console.error("[LimeTunaSpeech] result parse error:", e);
           if (typeof onError === "function") {
@@ -229,16 +306,19 @@ var LimeTunaSpeech = (function () {
       },
       function (err) {
         console.error("[LimeTunaSpeech] startLetter error:", err);
+        var parsedErr = err;
         if (typeof onError === "function") {
           try {
             if (typeof err === "string" && err.startsWith("{")) {
-              onError(JSON.parse(err));
-            } else {
-              onError(err);
+              parsedErr = JSON.parse(err);
             }
+            onError(parsedErr);
           } catch (e) {
             onError(err);
           }
+        }
+        if (parsedErr && typeof parsedErr.attempt_id === "number") {
+          cleanupAttempt(parsedErr.attempt_id);
         }
       },
       "LimeTunaSpeech",
