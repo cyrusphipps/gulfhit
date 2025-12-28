@@ -22,6 +22,7 @@ import org.apache.cordova.CordovaInterface;
 import org.apache.cordova.CordovaPlugin;
 import org.apache.cordova.CordovaWebView;
 import org.apache.cordova.PermissionHelper;
+import org.apache.cordova.PluginResult;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -68,12 +69,61 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private boolean stopIssued = false;
 
     private AttemptTiming currentTiming;
+    private RmsStats rmsStats = new RmsStats();
+    private long lastRmsDispatchMs = 0L;
+    private static final long RMS_DISPATCH_INTERVAL_MS = 80L;
+    private static final float RMS_AVG_ALPHA = 0.2f;
 
     private enum ListeningState {
         IDLE,
         SPEECH,
         SILENCE_WINDOW,
         COMMIT
+    }
+
+    private static class RmsStats {
+        float lastRmsDb = Float.NaN;
+        float avgRmsDb = Float.NaN;
+        float minRmsDb = Float.NaN;
+        float maxRmsDb = Float.NaN;
+        long lastUpdateMs = 0L;
+
+        void reset() {
+            lastRmsDb = Float.NaN;
+            avgRmsDb = Float.NaN;
+            minRmsDb = Float.NaN;
+            maxRmsDb = Float.NaN;
+            lastUpdateMs = 0L;
+        }
+
+        void update(float rmsDb, long nowMs) {
+            lastRmsDb = rmsDb;
+            lastUpdateMs = nowMs;
+
+            if (Float.isNaN(avgRmsDb)) {
+                avgRmsDb = rmsDb;
+            } else {
+                avgRmsDb = (RMS_AVG_ALPHA * rmsDb) + ((1 - RMS_AVG_ALPHA) * avgRmsDb);
+            }
+
+            if (Float.isNaN(minRmsDb) || rmsDb < minRmsDb) {
+                minRmsDb = rmsDb;
+            }
+            if (Float.isNaN(maxRmsDb) || rmsDb > maxRmsDb) {
+                maxRmsDb = rmsDb;
+            }
+        }
+
+        JSONObject toJson() throws JSONException {
+            JSONObject obj = new JSONObject();
+            if (!Float.isNaN(lastRmsDb)) obj.put("last_rms_db", lastRmsDb);
+            if (!Float.isNaN(avgRmsDb)) obj.put("avg_rms_db", avgRmsDb);
+            if (!Float.isNaN(minRmsDb)) obj.put("min_rms_db", minRmsDb);
+            if (!Float.isNaN(maxRmsDb)) obj.put("max_rms_db", maxRmsDb);
+            if (lastUpdateMs > 0) obj.put("last_update_ms", lastUpdateMs);
+            if (obj.length() == 0) return null;
+            return obj;
+        }
     }
 
     private static class AttemptTiming {
@@ -289,6 +339,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 stopIssued = false;
                 listeningState = ListeningState.IDLE;
                 cancelSilenceTimer(true);
+                rmsStats.reset();
+                lastRmsDispatchMs = 0L;
 
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
@@ -536,6 +588,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 // Waiting for commit; ignore further RMS.
                 break;
         }
+
+        if (isListening) {
+            sendRmsUpdateToCallback(rmsdB);
+        }
     }
 
     @Override
@@ -763,6 +819,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             raw.put("expected_letter", timing.expectedLetter);
         }
 
+        JSONObject rmsJson = rmsStats.toJson();
+        if (rmsJson != null) {
+            timingJson.put("rms_debug", rmsJson);
+        }
+
         JSONObject durations = new JSONObject();
         putDuration(durations, "d_queue_native_ms", timing.nativeStartListeningMs, timing.nativeReceivedMs);
         putDuration(durations, "d_engine_ready_ms", timing.nativeReadyForSpeechMs, timing.nativeStartListeningMs);
@@ -841,5 +902,35 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         cancelSilenceTimer(false);
         listeningState = ListeningState.IDLE;
         stopIssued = false;
+    }
+
+    private void sendRmsUpdateToCallback(float rmsdB) {
+        if (currentCallback == null) {
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        rmsStats.update(rmsdB, now);
+
+        if (lastRmsDispatchMs > 0 && (now - lastRmsDispatchMs) < RMS_DISPATCH_INTERVAL_MS) {
+            return;
+        }
+        lastRmsDispatchMs = now;
+
+        try {
+            JSONObject obj = new JSONObject();
+            obj.put("type", "rms");
+            obj.put("rms_db", rmsStats.lastRmsDb);
+            if (!Float.isNaN(rmsStats.avgRmsDb)) obj.put("avg_rms_db", rmsStats.avgRmsDb);
+            if (!Float.isNaN(rmsStats.minRmsDb)) obj.put("min_rms_db", rmsStats.minRmsDb);
+            if (!Float.isNaN(rmsStats.maxRmsDb)) obj.put("max_rms_db", rmsStats.maxRmsDb);
+            obj.put("t_ms", now);
+
+            PluginResult pr = new PluginResult(PluginResult.Status.OK, obj);
+            pr.setKeepCallback(true);
+            currentCallback.sendPluginResult(pr);
+        } catch (JSONException e) {
+            Log.w(TAG, "Failed to send RMS update", e);
+        }
     }
 }

@@ -156,7 +156,7 @@ var LimeTunaSpeech = (function () {
   /**
    * expectedLetter: single letter A–Z (upper or lower)
    */
-  function startLetter(expectedLetter, onResult, onError) {
+  function startLetter(expectedLetter, onResult, onError, onRmsUpdate) {
     if (!_initialized) {
       console.warn("[LimeTunaSpeech] startLetter called before init()");
     }
@@ -169,6 +169,13 @@ var LimeTunaSpeech = (function () {
             obj = JSON.parse(nativePayload);
           } else if (nativePayload && typeof nativePayload === "object") {
             obj = nativePayload;
+          }
+
+          if (obj && obj.type === "rms") {
+            if (typeof onRmsUpdate === "function") {
+              onRmsUpdate(obj);
+            }
+            return;
           }
 
           var rawText = obj.text || "";
