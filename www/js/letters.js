@@ -42,6 +42,7 @@ let soundLoseEl;
 let lastListenStartTs = 0;
 let currentAttemptTiming = null;
 let currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
+let currentAttemptToken = 0;
 
 let timingPanelEl;
 let timingStageEl;
@@ -83,6 +84,16 @@ function shuffleArray(arr) {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+function forceStopNativeListening() {
+  if (window.cordova && window.LimeTunaSpeech && typeof LimeTunaSpeech.stop === "function") {
+    try {
+      LimeTunaSpeech.stop();
+    } catch (e) {
+      console.warn("Failed to stop native listening (safe to ignore if idle):", e);
+    }
+  }
 }
 
 function parseErrorCode(err) {
@@ -551,7 +562,10 @@ function handleNoSpeechDetected(expectedUpper) {
   stopRmsDebugSession();
   clearPostSilenceTimer();
   clearListeningWatchdog();
+  forceStopNativeListening();
 
+  const attemptNumber = attemptCount + 1;
+  const attemptLabel = expectedUpper ? `${expectedUpper} attempt ${attemptNumber}/${MAX_ATTEMPTS_PER_LETTER}` : `Attempt ${attemptNumber}/${MAX_ATTEMPTS_PER_LETTER}`;
   const thresholdText =
     typeof currentThresholds.rmsVoiceTriggerDb === "number"
       ? ` (speech trigger > ${currentThresholds.rmsVoiceTriggerDb} dB RMS)`
@@ -560,7 +574,7 @@ function handleNoSpeechDetected(expectedUpper) {
     ? `No speech above the trigger${thresholdText} was detected before timing out.`
     : "Microphone did not report any audio levels before timing out.";
   const statusLines = [
-    "No microphone input detected for this letter.",
+    `No microphone input detected for ${attemptLabel}.`,
     rmsSeenThisAttempt
       ? "We heard very low audio, but nothing crossed the speech trigger. Try moving closer to the mic or speaking louder."
       : "We did not receive microphone levels. Please check microphone permissions or your device's input.",
@@ -573,7 +587,7 @@ function handleNoSpeechDetected(expectedUpper) {
   statusEl.textContent = statusLines.join("\n");
   updateTimingPanel(
     {
-      stageText: "No speech detected; retrying…",
+      stageText: `No speech detected for ${attemptLabel}; retrying…`,
       summaryText
     },
     true
@@ -711,26 +725,35 @@ function startListeningForCurrentLetter() {
     return;
   }
 
+  // Defensive: stop any lingering native session before starting a new attempt.
+  forceStopNativeListening();
+
   recognizing = true;
+  const attemptToken = ++currentAttemptToken;
+  const attemptNumber = attemptCount + 1;
+  const attemptLabel = `${expected.toUpperCase()} attempt ${attemptNumber}/${MAX_ATTEMPTS_PER_LETTER}`;
   lastListenStartTs = performance.now();
   currentAttemptTiming = {
-    js_start_ms: lastListenStartTs
+    js_start_ms: lastListenStartTs,
+    attemptToken,
+    expectedUpper: expected.toUpperCase()
   };
   speechDetectedForAttempt = false;
   rmsSeenThisAttempt = false;
   clearPostSilenceTimer();
   startRmsDebugSession();
   startListeningWatchdog(expected.toUpperCase());
-  statusEl.textContent =
-    "Listening for speech (waiting for Android speech engine)…";
+  statusEl.textContent = `Listening for ${attemptLabel} (waiting for Android speech engine)…`;
   console.log("[letters] stage=startListening", {
     expected,
+    attemptToken,
+    attemptNumber,
     js_start_ms: lastListenStartTs
   });
   updateTimingPanel(
     {
       stageText: "Waiting for engine ready…",
-      summaryText: "Start request sent to native speech engine…"
+      summaryText: `Start request sent to native speech engine for ${attemptLabel}…`
     },
     true
   );
@@ -738,6 +761,10 @@ function startListeningForCurrentLetter() {
   LimeTunaSpeech.startLetter(
     expected,
     function (result) {
+      if (attemptToken !== currentAttemptToken) {
+        console.warn("[letters] stale result ignored", { attemptToken, currentAttemptToken, result });
+        return;
+      }
       clearListeningWatchdog();
       const resultArrivalTs = performance.now();
       const engineMs = resultArrivalTs - lastListenStartTs;
@@ -789,7 +816,7 @@ function startListeningForCurrentLetter() {
       const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
 
       const statusLines = [
-        `Engine response: ~${engineMs.toFixed(0)} ms (JS handling ~${mapMs.toFixed(1)} ms).`,
+        `Engine response (${attemptLabel}): ~${engineMs.toFixed(0)} ms (JS handling ~${mapMs.toFixed(1)} ms).`,
         `Heard: "${rawText || ""}" → "${normalized || ""}" (expected "${expectedUpper}")`,
         engineBreakdownText,
         `Playing ${isCorrect ? "correct" : "wrong"} sound…`,
@@ -799,6 +826,7 @@ function startListeningForCurrentLetter() {
       statusEl.textContent = statusLines.join("\n");
 
       console.log("[letters] result received", {
+        attemptToken,
         engineMs,
         mapMs,
         result,
@@ -821,6 +849,10 @@ function startListeningForCurrentLetter() {
       }
     },
     function (err) {
+      if (attemptToken !== currentAttemptToken) {
+        console.warn("[letters] stale error ignored", { attemptToken, currentAttemptToken, err });
+        return;
+      }
       clearListeningWatchdog();
       recognizing = false;
 
@@ -850,6 +882,7 @@ function startListeningForCurrentLetter() {
       const engineBreakdown = buildEngineBreakdown(nativeDurations);
       const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
       console.log("[letters] stage=error", {
+        attemptToken,
         code,
         timing: timingPayload,
         nativeDurations,
@@ -880,7 +913,7 @@ function startListeningForCurrentLetter() {
       }
 
       statusEl.textContent = [
-        `Soft error after ~${engineMs.toFixed(0)} ms (error ${code || "unknown"}).`,
+        `Soft error (${attemptLabel}) after ~${engineMs.toFixed(0)} ms (error ${code || "unknown"}).`,
         engineBreakdownText,
         "Retrying this letter…",
         `Timings: ${summaryText}`
