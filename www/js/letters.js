@@ -15,6 +15,7 @@ const RMS_STALE_MS = 550;
 const RMS_SHORT_WINDOW_MS = 350;
 const POST_SILENCE_MS = 500;
 const LISTENING_WATCHDOG_MS = 8000;
+const NO_RMS_HINT_MS = 1500;
 
 let LETTER_SEQUENCE = [];
 let currentIndex = 0;
@@ -64,6 +65,7 @@ let rmsScaleEl;
 let speechDetectedForAttempt = false;
 let rmsSeenThisAttempt = false;
 let listeningWatchdogTimerId = null;
+let noRmsHintTimerId = null;
 const rmsDebugState = {
   timerId: null,
   active: false,
@@ -320,6 +322,7 @@ function stopRmsDebugSession() {
 
 function handleNativeRmsUpdate(payload) {
   if (!payload || typeof payload.rms_db !== "number") return;
+  clearNoRmsHintTimer();
   const now = performance.now();
   rmsDebugState.lastDb = payload.rms_db;
   rmsSeenThisAttempt = true;
@@ -557,6 +560,7 @@ function clearListeningWatchdog() {
 }
 
 function handleNoSpeechDetected(expectedUpper) {
+  clearNoRmsHintTimer();
   recognizing = false;
   speechDetectedForAttempt = false;
   stopRmsDebugSession();
@@ -572,13 +576,13 @@ function handleNoSpeechDetected(expectedUpper) {
       : "";
   const summaryText = rmsSeenThisAttempt
     ? `No speech above the trigger${thresholdText} was detected before timing out.`
-    : "Microphone did not report any audio levels before timing out.";
+    : "No RMS levels were seen before timing out. Please check microphone permission or availability.";
   const statusLines = [
     `No microphone input detected for ${attemptLabel}.`,
     rmsSeenThisAttempt
       ? "We heard very low audio, but nothing crossed the speech trigger. Try moving closer to the mic or speaking louder."
       : "We did not receive microphone levels. Please check microphone permissions or your device's input.",
-    "Retrying this letter…"
+    "No RMS seen before timeout; retrying this letter…"
   ];
   if (expectedUpper) {
     statusLines.unshift(`Listening for "${expectedUpper}" timed out.`);
@@ -602,6 +606,34 @@ function startListeningWatchdog(expectedUpper) {
     if (!recognizing) return;
     handleNoSpeechDetected(expectedUpper);
   }, LISTENING_WATCHDOG_MS);
+}
+
+function clearNoRmsHintTimer() {
+  if (noRmsHintTimerId) {
+    clearTimeout(noRmsHintTimerId);
+    noRmsHintTimerId = null;
+  }
+}
+
+function startNoRmsHintTimer(attemptLabel) {
+  clearNoRmsHintTimer();
+  noRmsHintTimerId = setTimeout(() => {
+    if (!recognizing || rmsSeenThisAttempt) return;
+    const hintLines = [
+      `Still waiting for microphone levels for ${attemptLabel}…`,
+      "If prompted, allow microphone access or ensure your mic is connected/unmuted."
+    ];
+    const summaryText = `No RMS seen after ~${NO_RMS_HINT_MS} ms; waiting for microphone levels before the main timeout.`;
+    statusEl.textContent = [statusEl.textContent, hintLines.join("\n")].filter(Boolean).join("\n");
+    updateTimingPanel(
+      {
+        stageText: "Waiting for microphone levels…",
+        summaryText
+      },
+      true
+    );
+    console.warn("[letters] rms hint timer fired without audio levels");
+  }, NO_RMS_HINT_MS);
 }
 
 function startNewGame() {
@@ -727,6 +759,7 @@ function startListeningForCurrentLetter() {
 
   // Defensive: stop any lingering native session before starting a new attempt.
   forceStopNativeListening();
+  clearNoRmsHintTimer();
 
   recognizing = true;
   const attemptToken = ++currentAttemptToken;
@@ -738,11 +771,28 @@ function startListeningForCurrentLetter() {
     attemptToken,
     expectedUpper: expected.toUpperCase()
   };
+  const renderNativeReady = (payload) => {
+    const detail = payload && payload.message ? ` (${payload.message})` : "";
+    const readyLines = [
+      `Listening for ${attemptLabel}.`,
+      `Engine ready${detail}; waiting for speech…`
+    ];
+    statusEl.textContent = readyLines.join("\n");
+    updateTimingPanel(
+      {
+        stageText: "Engine ready; waiting for speech…",
+        summaryText: `Engine reported ready for ${attemptLabel}.`
+      },
+      true
+    );
+    console.log("[letters] native ready callback", { attemptToken, payload });
+  };
   speechDetectedForAttempt = false;
   rmsSeenThisAttempt = false;
   clearPostSilenceTimer();
   startRmsDebugSession();
   startListeningWatchdog(expected.toUpperCase());
+  startNoRmsHintTimer(attemptLabel);
   statusEl.textContent = `Listening for ${attemptLabel} (waiting for Android speech engine)…`;
   console.log("[letters] stage=startListening", {
     expected,
@@ -758,171 +808,208 @@ function startListeningForCurrentLetter() {
     true
   );
 
-  LimeTunaSpeech.startLetter(
-    expected,
-    function (result) {
-      if (attemptToken !== currentAttemptToken) {
-        console.warn("[letters] stale result ignored", { attemptToken, currentAttemptToken, result });
-        return;
-      }
-      clearListeningWatchdog();
-      const resultArrivalTs = performance.now();
-      const engineMs = resultArrivalTs - lastListenStartTs;
-      recordJsTiming("js_got_result_ms");
-      enterPostSilenceWindow();
-      stopRmsDebugSession();
-      speechDetectedForAttempt = false;
+  try {
+    LimeTunaSpeech.startLetter(
+      expected,
+      function (result) {
+        if (result && result.type === "ready") {
+          renderNativeReady(result);
+          return;
+        }
+        if (attemptToken !== currentAttemptToken) {
+          console.warn("[letters] stale result ignored", { attemptToken, currentAttemptToken, result });
+          return;
+        }
+        clearListeningWatchdog();
+        clearNoRmsHintTimer();
+        const resultArrivalTs = performance.now();
+        const engineMs = resultArrivalTs - lastListenStartTs;
+        recordJsTiming("js_got_result_ms");
+        enterPostSilenceWindow();
+        stopRmsDebugSession();
+        speechDetectedForAttempt = false;
 
-      recognizing = false;
+        recognizing = false;
 
-      const mapStart = performance.now();
+        const mapStart = performance.now();
 
-      const rawText = result && result.text;
-      const normalized = result && result.normalizedLetter;
-      const expectedUpper = expected.toUpperCase();
-      const timingPayload = result && result.timing;
+        const rawText = result && result.text;
+        const normalized = result && result.normalizedLetter;
+        const expectedUpper = expected.toUpperCase();
+        const timingPayload = result && result.timing;
 
-      let isCorrect = false;
-      if (normalized && normalized === expectedUpper) {
-        isCorrect = true;
-      }
+        let isCorrect = false;
+        if (normalized && normalized === expectedUpper) {
+          isCorrect = true;
+        }
 
-      const mapEnd = performance.now();
-      const mapMs = mapEnd - mapStart;
-      recordJsTiming("js_decision_ms");
-      if (currentAttemptTiming) {
-        currentAttemptTiming.lastTimingPayload = timingPayload;
-      }
-      updateCurrentThresholds(timingPayload);
+        const mapEnd = performance.now();
+        const mapMs = mapEnd - mapStart;
+        recordJsTiming("js_decision_ms");
+        if (currentAttemptTiming) {
+          currentAttemptTiming.lastTimingPayload = timingPayload;
+        }
+        updateCurrentThresholds(timingPayload);
 
-      const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
-      const jsDurations = {};
-      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
-        jsDurations.d_total_js = resultArrivalTs - currentAttemptTiming.js_start_ms;
-      } else {
-        jsDurations.d_total_js = engineMs;
-      }
-      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined && currentAttemptTiming.js_decision_ms !== undefined) {
-        jsDurations.d_decision_ms = currentAttemptTiming.js_decision_ms - currentAttemptTiming.js_start_ms;
-      }
-      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined && currentAttemptTiming.js_audio_start_ms !== undefined) {
-        jsDurations.d_audio_start_ms = currentAttemptTiming.js_audio_start_ms - currentAttemptTiming.js_start_ms;
-      }
+        const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
+        const jsDurations = {};
+        if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
+          jsDurations.d_total_js = resultArrivalTs - currentAttemptTiming.js_start_ms;
+        } else {
+          jsDurations.d_total_js = engineMs;
+        }
+        if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined && currentAttemptTiming.js_decision_ms !== undefined) {
+          jsDurations.d_decision_ms = currentAttemptTiming.js_decision_ms - currentAttemptTiming.js_start_ms;
+        }
+        if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined && currentAttemptTiming.js_audio_start_ms !== undefined) {
+          jsDurations.d_audio_start_ms = currentAttemptTiming.js_audio_start_ms - currentAttemptTiming.js_start_ms;
+        }
 
-      const stageLines = buildStageLines(timingPayload);
-      const stageText = stageLines.join(" · ");
-      const summaryText = buildTimingSummary(nativeDurations, jsDurations);
-      const engineBreakdown = buildEngineBreakdown(nativeDurations);
-      const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
+        const stageLines = buildStageLines(timingPayload);
+        const stageText = stageLines.join(" · ");
+        const summaryText = buildTimingSummary(nativeDurations, jsDurations);
+        const engineBreakdown = buildEngineBreakdown(nativeDurations);
+        const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
 
-      const statusLines = [
-        `Engine response (${attemptLabel}): ~${engineMs.toFixed(0)} ms (JS handling ~${mapMs.toFixed(1)} ms).`,
-        `Heard: "${rawText || ""}" → "${normalized || ""}" (expected "${expectedUpper}")`,
-        engineBreakdownText,
-        `Playing ${isCorrect ? "correct" : "wrong"} sound…`,
-        `Timings: ${summaryText}`
-      ].filter(Boolean);
-
-      statusEl.textContent = statusLines.join("\n");
-
-      console.log("[letters] result received", {
-        attemptToken,
-        engineMs,
-        mapMs,
-        result,
-        expected: expectedUpper,
-        timing: timingPayload,
-        jsDurations
-      });
-      updateTimingPanel(
-        {
-          stageText,
-          summaryText
-        },
-        true
-      );
-
-      if (isCorrect) {
-        handleCorrect();
-      } else {
-        handleIncorrect();
-      }
-    },
-    function (err) {
-      if (attemptToken !== currentAttemptToken) {
-        console.warn("[letters] stale error ignored", { attemptToken, currentAttemptToken, err });
-        return;
-      }
-      clearListeningWatchdog();
-      recognizing = false;
-
-      const now = performance.now();
-      const engineMs = now - lastListenStartTs;
-      recordJsTiming("js_got_result_ms");
-      enterPostSilenceWindow();
-      stopRmsDebugSession();
-      speechDetectedForAttempt = false;
-
-      const code = parseErrorCode(err);
-      console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
-      const timingPayload = err && err.timing ? err.timing : null;
-      if (currentAttemptTiming) {
-        currentAttemptTiming.lastTimingPayload = timingPayload;
-      }
-      updateCurrentThresholds(timingPayload);
-      const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
-      const jsDurations = {};
-      if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
-        jsDurations.d_total_js = now - currentAttemptTiming.js_start_ms;
-      } else {
-        jsDurations.d_total_js = engineMs;
-      }
-      const stageLines = buildStageLines(timingPayload);
-      const summaryText = buildTimingSummary(nativeDurations, jsDurations);
-      const engineBreakdown = buildEngineBreakdown(nativeDurations);
-      const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
-      console.log("[letters] stage=error", {
-        attemptToken,
-        code,
-        timing: timingPayload,
-        nativeDurations,
-        jsDurations
-      });
-      updateTimingPanel(
-        {
-          stageText: stageLines.join(" · "),
-          summaryText
-        },
-        true
-      );
-      resetTimingIndicator();
-
-      if (isHardSttErrorCode(code)) {
-        sttFatalError = true;
-        sttEnabled = false;
-        statusEl.textContent = [
-          `Engine error after ~${engineMs.toFixed(0)} ms (code ${code || "unknown"}).`,
+        const statusLines = [
+          `Engine response (${attemptLabel}): ~${engineMs.toFixed(0)} ms (JS handling ~${mapMs.toFixed(1)} ms).`,
+          `Heard: "${rawText || ""}" → "${normalized || ""}" (expected "${expectedUpper}")`,
           engineBreakdownText,
-          "Speech engine error. Letters will show without listening.",
+          `Playing ${isCorrect ? "correct" : "wrong"} sound…`,
+          `Timings: ${summaryText}`
+        ].filter(Boolean);
+
+        statusEl.textContent = statusLines.join("\n");
+
+        console.log("[letters] result received", {
+          attemptToken,
+          engineMs,
+          mapMs,
+          result,
+          expected: expectedUpper,
+          timing: timingPayload,
+          jsDurations
+        });
+        updateTimingPanel(
+          {
+            stageText,
+            summaryText
+          },
+          true
+        );
+
+        if (isCorrect) {
+          handleCorrect();
+        } else {
+          handleIncorrect();
+        }
+      },
+      function (err) {
+        if (err && err.type === "ready") {
+          renderNativeReady(err);
+          return;
+        }
+        if (attemptToken !== currentAttemptToken) {
+          console.warn("[letters] stale error ignored", { attemptToken, currentAttemptToken, err });
+          return;
+        }
+        clearListeningWatchdog();
+        clearNoRmsHintTimer();
+        recognizing = false;
+
+        const now = performance.now();
+        const engineMs = now - lastListenStartTs;
+        recordJsTiming("js_got_result_ms");
+        enterPostSilenceWindow();
+        stopRmsDebugSession();
+        speechDetectedForAttempt = false;
+
+        const code = parseErrorCode(err);
+        console.error("LimeTunaSpeech.startLetter error:", err, "code=", code);
+        const timingPayload = err && err.timing ? err.timing : null;
+        if (currentAttemptTiming) {
+          currentAttemptTiming.lastTimingPayload = timingPayload;
+        }
+        updateCurrentThresholds(timingPayload);
+        const nativeDurations = timingPayload && timingPayload.native_durations ? timingPayload.native_durations : null;
+        const jsDurations = {};
+        if (currentAttemptTiming && currentAttemptTiming.js_start_ms !== undefined) {
+          jsDurations.d_total_js = now - currentAttemptTiming.js_start_ms;
+        } else {
+          jsDurations.d_total_js = engineMs;
+        }
+        const stageLines = buildStageLines(timingPayload);
+        const summaryText = buildTimingSummary(nativeDurations, jsDurations);
+        const engineBreakdown = buildEngineBreakdown(nativeDurations);
+        const engineBreakdownText = engineBreakdown.text || "Engine breakdown unavailable.";
+        console.log("[letters] stage=error", {
+          attemptToken,
+          code,
+          timing: timingPayload,
+          nativeDurations,
+          jsDurations
+        });
+        updateTimingPanel(
+          {
+            stageText: stageLines.join(" · "),
+            summaryText
+          },
+          true
+        );
+        resetTimingIndicator();
+
+        if (isHardSttErrorCode(code)) {
+          sttFatalError = true;
+          sttEnabled = false;
+          statusEl.textContent = [
+            `Engine error after ~${engineMs.toFixed(0)} ms (code ${code || "unknown"}).`,
+            engineBreakdownText,
+            "Speech engine error. Letters will show without listening.",
+            `Timings: ${summaryText}`
+          ].join("\n");
+
+          // Continue the game flow even when STT is disabled so the UI can finish updating.
+          advanceToNextLetter({ skipListening: true });
+          return;
+        }
+
+        statusEl.textContent = [
+          `Soft error (${attemptLabel}) after ~${engineMs.toFixed(0)} ms (error ${code || "unknown"}).`,
+          engineBreakdownText,
+          "Retrying this letter…",
           `Timings: ${summaryText}`
         ].join("\n");
 
-        // Continue the game flow even when STT is disabled so the UI can finish updating.
-        advanceToNextLetter({ skipListening: true });
-        return;
+        retryOrAdvance();
+      },
+      function (payload) {
+        handleNativeRmsUpdate(payload);
+        if (payload && payload.type === "ready") {
+          renderNativeReady(payload);
+        }
       }
-
-      statusEl.textContent = [
-        `Soft error (${attemptLabel}) after ~${engineMs.toFixed(0)} ms (error ${code || "unknown"}).`,
-        engineBreakdownText,
-        "Retrying this letter…",
-        `Timings: ${summaryText}`
-      ].join("\n");
-
-      retryOrAdvance();
-    },
-    handleNativeRmsUpdate
-  );
+    );
+  } catch (err) {
+    console.error("LimeTunaSpeech.startLetter threw synchronously", err);
+    clearListeningWatchdog();
+    clearNoRmsHintTimer();
+    recognizing = false;
+    stopRmsDebugSession();
+    resetTimingIndicator();
+    statusEl.textContent = [
+      `Start failed for ${attemptLabel} (synchronous exception).`,
+      err && err.message ? err.message : String(err),
+      "Retrying this letter…"
+    ].join("\n");
+    updateTimingPanel(
+      {
+        stageText: "Start request failed before reaching engine.",
+        summaryText: "startLetter threw synchronously; will retry."
+      },
+      true
+    );
+    retryOrAdvance();
+  }
 }
 
 function handleCorrect() {
