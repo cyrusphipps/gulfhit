@@ -899,31 +899,52 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     }
 
     private void ensureRmsSpeechStart(long startMs) {
-        if (currentTiming != null && currentTiming.nativeRmsSpeechStartMs == 0) {
+        if (currentTiming == null) {
+            return;
+        }
+
+        if (currentTiming.nativeRmsSpeechStartMs == 0) {
             currentTiming.nativeRmsSpeechStartMs = startMs;
-            scheduleSpeechFailSafe(startMs);
+        }
+
+        if (speechFailSafeRunnable == null && currentTiming.nativeRmsSpeechStartMs > 0) {
+            scheduleSpeechFailSafe(currentTiming.nativeRmsSpeechStartMs);
         }
     }
 
     private void scheduleSpeechFailSafe(long startMs) {
+        if (startMs <= 0) {
+            return;
+        }
+
+        long now = SystemClock.elapsedRealtime();
+        long remainingMs = MAX_SPEECH_WINDOW_MS - (now - startMs);
+        if (remainingMs <= 0) {
+            triggerSpeechFailSafe(now);
+            return;
+        }
+
         cancelSpeechFailSafe();
         if (handler != null) {
             speechFailSafeRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    if (stopIssued || listeningState == ListeningState.COMMIT) {
-                        return;
-                    }
-                    listeningState = ListeningState.COMMIT;
-                    long now = SystemClock.elapsedRealtime();
-                    if (currentTiming != null && currentTiming.nativeRmsSpeechEndMs == 0) {
-                        currentTiming.nativeRmsSpeechEndMs = now;
-                    }
-                    stopListeningInternal(false);
+                    triggerSpeechFailSafe(SystemClock.elapsedRealtime());
                 }
             };
-            handler.postDelayed(speechFailSafeRunnable, MAX_SPEECH_WINDOW_MS);
+            handler.postDelayed(speechFailSafeRunnable, remainingMs);
         }
+    }
+
+    private void triggerSpeechFailSafe(long now) {
+        if (stopIssued || listeningState == ListeningState.COMMIT) {
+            return;
+        }
+        listeningState = ListeningState.COMMIT;
+        if (currentTiming != null && currentTiming.nativeRmsSpeechEndMs == 0) {
+            currentTiming.nativeRmsSpeechEndMs = now;
+        }
+        stopListeningInternal(false);
     }
 
     private void cancelSpeechFailSafe() {
