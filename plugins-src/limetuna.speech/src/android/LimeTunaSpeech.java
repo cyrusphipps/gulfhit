@@ -228,7 +228,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         JSONObject toJson(float baselineRmsDb) throws JSONException {
             JSONObject thresholds = new JSONObject();
             thresholds.put("rms_voice_trigger_db", rmsVoiceTriggerDb);
-            thresholds.put("rms_start_threshold_db", rmsStartThresholdDb);
+            if (Float.isInfinite(rmsStartThresholdDb)) {
+                thresholds.put("rms_start_threshold_db", "-Infinity");
+            } else {
+                thresholds.put("rms_start_threshold_db", rmsStartThresholdDb);
+            }
             thresholds.put("rms_end_threshold_db", rmsEndThresholdDb);
             thresholds.put("post_silence_ms", postSilenceMs);
             thresholds.put("max_utterance_ms", maxUtteranceMs);
@@ -745,10 +749,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         ThresholdConfig thresholds = thresholdConfig.get();
         sessionPeakRmsDb = Math.max(sessionPeakRmsDb, rmsdB);
         if (!Float.isInfinite(sessionPeakRmsDb)) {
-            // Adaptive end threshold: allow quieter tails by setting the trigger
-            // to ~70% of the peak, floored to a safe minimum.
-            float candidate = sessionPeakRmsDb * 0.7f; // ~30% below peak
-            float floored = Math.max(candidate, -8f);
+            float candidate = sessionPeakRmsDb * 0.8f; // 20% below peak
+            float floored = Math.max(candidate, -5f);
             adaptiveEndThresholdDb = Math.min(thresholds.rmsEndThresholdDb, floored);
         } else {
             adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
@@ -1329,6 +1331,9 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 if (!Double.isNaN(candidate) && candidate >= MAX_UTTERANCE_MS) {
                     maxUtterance = (long) candidate;
                 }
+            }
+            if (opts.has("rmsStartThresholdDb")) {
+                Log.i(TAG, "Ignoring rmsStartThresholdDb override; start gate is disabled");
             }
         }
 
