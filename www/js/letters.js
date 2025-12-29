@@ -7,6 +7,7 @@
 // on the fly for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
+  // Start gating is disabled; we rely solely on the end/silence threshold.
 };
 const NATIVE_SILENCE_END_THRESHOLD_DB = 1.5;
 
