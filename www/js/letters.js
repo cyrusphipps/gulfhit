@@ -917,6 +917,8 @@ function startListeningForCurrentLetter() {
         clearNoRmsHintTimer();
         recognizing = false;
 
+        const hadSpeechDetection = speechDetectedForAttempt;
+        const sawAnyRms = rmsSeenThisAttempt;
         const now = performance.now();
         const engineMs = now - lastListenStartTs;
         recordJsTiming("js_got_result_ms");
@@ -959,11 +961,25 @@ function startListeningForCurrentLetter() {
         resetTimingIndicator();
 
         if (code === "NO_MATCH") {
-          statusEl.textContent = [
-            `No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms). Counting as incorrect.`,
-            engineBreakdownText,
-            `Timings: ${summaryText}`
-          ].join("\n");
+          const lines = [`No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms).`];
+          if (!sawAnyRms) {
+            lines.push(
+              "We never received microphone levels from the speech engine. Check mic permissions or your device input and try again.",
+              "Retrying this letter without playing the wrong-answer sound…",
+              engineBreakdownText,
+              `Timings: ${summaryText}`
+            );
+            statusEl.textContent = lines.join("\n");
+            retryOrAdvance();
+            return;
+          }
+          if (hadSpeechDetection) {
+            lines.push("We detected speech but the engine could not transcribe a letter. Counting as incorrect.");
+          } else {
+            lines.push("We heard quiet audio, but nothing crossed the speech trigger. Try speaking louder or closer to the mic.");
+          }
+          lines.push(engineBreakdownText, `Timings: ${summaryText}`);
+          statusEl.textContent = lines.join("\n");
           handleIncorrect();
           return;
         }
