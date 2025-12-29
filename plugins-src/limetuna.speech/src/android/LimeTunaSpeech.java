@@ -44,8 +44,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private static final float RMS_VOICE_TRIGGER_DB = -2.0f;
 
     // Recognizer RMS values typically floor around -2 dB. Consider values
-    // >= ~3-4 dB as the beginning of speech, and drop below ~2-3 dB as silence.
-    private static final float RMS_START_THRESHOLD_DB = 3.4f;
+    // >= ~1.5-2 dB as the beginning of speech, and drop below ~2-3 dB as silence.
+    private static final float RMS_START_THRESHOLD_DB = 1.5f;
     private static final float RMS_END_THRESHOLD_DB = 1.5f;
     private static final long POST_SILENCE_MS = 1200L;
     private static final long MAX_UTTERANCE_MS = 3300L;

@@ -917,6 +917,8 @@ function startListeningForCurrentLetter() {
         clearNoRmsHintTimer();
         recognizing = false;
 
+        const hadSpeechDetection = speechDetectedForAttempt;
+        const sawAnyRms = rmsSeenThisAttempt;
         const now = performance.now();
         const engineMs = now - lastListenStartTs;
         recordJsTiming("js_got_result_ms");
@@ -959,12 +961,25 @@ function startListeningForCurrentLetter() {
         resetTimingIndicator();
 
         if (code === "NO_MATCH") {
-          statusEl.textContent = [
-            `No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms). Counting as incorrect.`,
-            engineBreakdownText,
-            `Timings: ${summaryText}`
-          ].join("\n");
-          handleIncorrect();
+          const lines = [`No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms).`];
+          if (!sawAnyRms) {
+            lines.push(
+              "We never received microphone levels from the speech engine. Check mic permissions or your device input and try again.",
+              "Retrying this letter without playing the wrong-answer sound…",
+              engineBreakdownText,
+              `Timings: ${summaryText}`
+            );
+            statusEl.textContent = lines.join("\n");
+            retryOrAdvance();
+            return;
+          }
+          if (hadSpeechDetection) {
+            lines.push("We detected speech but the engine could not transcribe a letter. Retrying without penalty and resetting the engine…");
+          } else {
+            lines.push("We heard quiet audio, but nothing crossed the speech trigger. Try speaking louder or closer to the mic.");
+          }
+          lines.push(engineBreakdownText, `Timings: ${summaryText}`);
+          retryNoMatchWithoutPenalty(lines, { resetEngine: hadSpeechDetection });
           return;
         }
 
@@ -1068,6 +1083,49 @@ function handleIncorrect() {
     playSound(soundWrongEl, () => {
       advanceToNextLetter();
     });
+  }
+}
+
+function playFinalWrongAndAdvance() {
+  feedbackEl.textContent = "✕ Wrong letter.";
+  feedbackEl.style.color = "#c62828";
+  statusEl.textContent += "\nPlaying wrong sound and moving on…";
+
+  recordJsTiming("js_audio_start_ms");
+  refreshTimingSummaryAfterAudio();
+  playSound(soundWrongEl, () => {
+    advanceToNextLetter();
+  });
+}
+
+function retryNoMatchWithoutPenalty(statusLines, options) {
+  attemptCount++;
+  const hasRetry = attemptCount < MAX_ATTEMPTS_PER_LETTER;
+  feedbackEl.textContent = hasRetry ? "↻ Let's try again." : "✕ Wrong letter.";
+  feedbackEl.style.color = hasRetry ? "#455a64" : "#c62828";
+
+  if (hasRetry) {
+    statusLines.push("Retrying this letter without counting it as incorrect…");
+  } else {
+    statusLines.push("No retries left; counting this letter as incorrect.");
+  }
+
+  statusEl.textContent = statusLines.join("\n");
+
+  if (!hasRetry) {
+    playFinalWrongAndAdvance();
+    return;
+  }
+
+  const restart = () => startListeningForCurrentLetter();
+  const opts = options || {};
+  if (opts.resetEngine && window.LimeTunaSpeech && typeof LimeTunaSpeech.resetRecognizer === "function") {
+    LimeTunaSpeech.resetRecognizer(
+      () => restart(),
+      () => restart()
+    );
+  } else {
+    restart();
   }
 }
 
