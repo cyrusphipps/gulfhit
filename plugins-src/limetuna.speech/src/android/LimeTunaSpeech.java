@@ -43,10 +43,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     // timing indicator purposes (not an ASR gate).
     private static final float RMS_VOICE_TRIGGER_DB = -2.0f;
 
-    // Recognizer RMS values typically floor around -2 dB. The start threshold is
-    // intentionally disabled; we immediately enter SPEECH on the first RMS callback
-    // and only enforce the end threshold for silence handling.
-    private static final float RMS_START_THRESHOLD_DB = Float.NEGATIVE_INFINITY;
+    // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
+    private static final float RMS_START_THRESHOLD_DB = -1000f;
     private static final float RMS_END_THRESHOLD_DB = 1.5f;
     private static final long POST_SILENCE_MS = 1000L;
     private static final long MAX_UTTERANCE_MS = 3300L;
@@ -79,6 +77,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     private AttemptTiming currentTiming;
     private long attemptCounter = 0L;
+    private float sessionPeakRmsDb = Float.NEGATIVE_INFINITY;
+    private float adaptiveEndThresholdDb = RMS_END_THRESHOLD_DB;
     private RmsStats rmsStats = new RmsStats();
     private long lastRmsDispatchMs = 0L;
     private static final long RMS_DISPATCH_INTERVAL_MS = 80L;
@@ -506,6 +506,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 lastRmsDispatchMs = 0L;
                 lastPartialResults = null;
                 consecutiveZeroRmsWindows = 0;
+                sessionPeakRmsDb = Float.NEGATIVE_INFINITY;
+                adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
 
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
@@ -745,6 +747,14 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     public void onRmsChanged(float rmsdB) {
         Log.v(TAG, "onRmsChanged: " + rmsdB);
         ThresholdConfig thresholds = thresholdConfig.get();
+        sessionPeakRmsDb = Math.max(sessionPeakRmsDb, rmsdB);
+        if (!Float.isInfinite(sessionPeakRmsDb)) {
+            float candidate = sessionPeakRmsDb * 0.8f; // 20% below peak
+            float floored = Math.max(candidate, -5f);
+            adaptiveEndThresholdDb = Math.min(thresholds.rmsEndThresholdDb, floored);
+        } else {
+            adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
+        }
         if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && rmsdB > thresholds.rmsVoiceTriggerDb) {
             currentTiming.nativeFirstRmsAboveThresholdMs = SystemClock.elapsedRealtime();
             Log.d(TAG, "LimeTunaSpeech stage=rms_threshold t=" + currentTiming.nativeFirstRmsAboveThresholdMs + " rmsdB=" + rmsdB);
@@ -763,14 +773,16 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 cancelSilenceTimer(true);
                 break;
             case SPEECH:
-                if (rmsdB < thresholds.rmsEndThresholdDb) {
+                if (rmsdB < adaptiveEndThresholdDb) {
                     beginSilenceWindow(now);
                 }
                 break;
             case SILENCE_WINDOW: {
-                cancelSilenceTimer(true);
-                listeningState = ListeningState.SPEECH;
-                ensureRmsSpeechStart(now);
+                if (rmsdB >= adaptiveEndThresholdDb) {
+                    cancelSilenceTimer(true);
+                    listeningState = ListeningState.SPEECH;
+                    ensureRmsSpeechStart(now);
+                }
                 break;
             }
             case COMMIT:
