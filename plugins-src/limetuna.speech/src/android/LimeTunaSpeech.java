@@ -47,6 +47,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
     private static final float RMS_START_THRESHOLD_DB = -1000f;
     private static final float RMS_END_THRESHOLD_DB = 2.5f;
+    private static final float END_BASELINE_DELTA_PERCENT = 0.45f;
+    private static final float END_BASELINE_DELTA_DB_MIN = 2.0f;
     private static final float RMS_RESUME_DELTA_DB = 0.6f;
     private static final long POST_SILENCE_MS = 1300L;
     private static final long MIN_POST_SILENCE_MS = 450L;
@@ -559,7 +561,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 consecutiveZeroRmsWindows = 0;
                 belowEndThresholdSinceMs = 0L;
                 sessionPeakRmsDb = Float.NEGATIVE_INFINITY;
-                adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
+                adaptiveEndThresholdDb = computeEndThresholdDb(thresholds);
 
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
@@ -806,10 +808,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         sessionPeakRmsDb = Math.max(sessionPeakRmsDb, detectionRmsDb);
         if (!Float.isInfinite(sessionPeakRmsDb)) {
             float candidate = detectionRmsDb * 0.8f; // 20% below peak
-            float floored = Math.max(candidate, -5f);
+            float floored = Math.max(candidate, computeEndThresholdDb(thresholds));
             adaptiveEndThresholdDb = Math.min(thresholds.rmsEndThresholdDb, floored);
         } else {
-            adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
+            adaptiveEndThresholdDb = computeEndThresholdDb(thresholds);
         }
         if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && detectionRmsDb > thresholds.rmsVoiceTriggerDb) {
             currentTiming.nativeFirstRmsAboveThresholdMs = SystemClock.elapsedRealtime();
@@ -1285,6 +1287,20 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             handler.removeCallbacks(speechFailSafeRunnable);
         }
         speechFailSafeRunnable = null;
+    }
+
+    private float computeEndThresholdDb(ThresholdConfig thresholds) {
+        if (thresholds == null) {
+            return RMS_END_THRESHOLD_DB;
+        }
+        float base = thresholds.rmsEndThresholdDb;
+        float baseline = rmsStats.getBaselineRmsDb();
+        if (!Float.isNaN(baseline)) {
+            float deltaFromBaseline = Math.max(END_BASELINE_DELTA_DB_MIN,
+                    Math.abs(baseline) * END_BASELINE_DELTA_PERCENT);
+            base = baseline + deltaFromBaseline;
+        }
+        return base;
     }
 
     private void resetListeningState() {
