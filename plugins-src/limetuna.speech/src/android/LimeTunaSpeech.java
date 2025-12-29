@@ -43,11 +43,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     // timing indicator purposes (not an ASR gate).
     private static final float RMS_VOICE_TRIGGER_DB = -2.0f;
 
-    // Recognizer RMS values typically floor around -2 dB. Consider values
-    // >= ~3-4 dB as the beginning of speech, and drop below ~2-3 dB as silence.
-    private static final float RMS_START_THRESHOLD_DB = 3.4f;
+    // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
+    private static final float RMS_START_THRESHOLD_DB = -1000f;
     private static final float RMS_END_THRESHOLD_DB = 1.5f;
-    private static final long POST_SILENCE_MS = 1200L;
+    private static final long POST_SILENCE_MS = 1000L;
     private static final long MAX_UTTERANCE_MS = 3300L;
     private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
 
@@ -78,6 +77,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     private AttemptTiming currentTiming;
     private long attemptCounter = 0L;
+    private float sessionPeakRmsDb = Float.NEGATIVE_INFINITY;
+    private float adaptiveEndThresholdDb = RMS_END_THRESHOLD_DB;
     private RmsStats rmsStats = new RmsStats();
     private long lastRmsDispatchMs = 0L;
     private static final long RMS_DISPATCH_INTERVAL_MS = 80L;
@@ -501,6 +502,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 lastRmsDispatchMs = 0L;
                 lastPartialResults = null;
                 consecutiveZeroRmsWindows = 0;
+                sessionPeakRmsDb = Float.NEGATIVE_INFINITY;
+                adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
 
                 AttemptTiming timing = new AttemptTiming();
                 timing.nativeReceivedMs = SystemClock.elapsedRealtime();
@@ -740,6 +743,14 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     public void onRmsChanged(float rmsdB) {
         Log.v(TAG, "onRmsChanged: " + rmsdB);
         ThresholdConfig thresholds = thresholdConfig.get();
+        sessionPeakRmsDb = Math.max(sessionPeakRmsDb, rmsdB);
+        if (!Float.isInfinite(sessionPeakRmsDb)) {
+            float candidate = sessionPeakRmsDb * 0.8f; // 20% below peak
+            float floored = Math.max(candidate, -5f);
+            adaptiveEndThresholdDb = Math.min(thresholds.rmsEndThresholdDb, floored);
+        } else {
+            adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
+        }
         if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && rmsdB > thresholds.rmsVoiceTriggerDb) {
             currentTiming.nativeFirstRmsAboveThresholdMs = SystemClock.elapsedRealtime();
             Log.d(TAG, "LimeTunaSpeech stage=rms_threshold t=" + currentTiming.nativeFirstRmsAboveThresholdMs + " rmsdB=" + rmsdB);
@@ -753,19 +764,17 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         switch (listeningState) {
             case IDLE:
-                if (rmsdB >= thresholds.rmsStartThresholdDb) {
-                    listeningState = ListeningState.SPEECH;
-                    ensureRmsSpeechStart(now);
-                    cancelSilenceTimer(true);
-                }
+                listeningState = ListeningState.SPEECH;
+                ensureRmsSpeechStart(now);
+                cancelSilenceTimer(true);
                 break;
             case SPEECH:
-                if (rmsdB < thresholds.rmsEndThresholdDb) {
+                if (rmsdB < adaptiveEndThresholdDb) {
                     beginSilenceWindow(now);
                 }
                 break;
             case SILENCE_WINDOW: {
-                if (rmsdB >= thresholds.rmsStartThresholdDb) {
+                if (rmsdB >= adaptiveEndThresholdDb) {
                     cancelSilenceTimer(true);
                     listeningState = ListeningState.SPEECH;
                     ensureRmsSpeechStart(now);
@@ -1301,12 +1310,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         long maxUtterance = defaults.maxUtteranceMs;
 
         if (opts != null) {
-            if (opts.has("rmsStartThresholdDb")) {
-                double candidate = opts.optDouble("rmsStartThresholdDb", Double.NaN);
-                if (!Double.isNaN(candidate)) {
-                    start = Math.min((float) candidate, RMS_START_THRESHOLD_DB);
-                }
-            }
             if (opts.has("rmsEndThresholdDb")) {
                 double candidate = opts.optDouble("rmsEndThresholdDb", Double.NaN);
                 if (!Double.isNaN(candidate)) {
