@@ -2,21 +2,23 @@
 
 // Speech timing/indicator thresholds. Keep in sync with the native
 // LimeTunaSpeech constants so we can retune or delete the indicator in one go.
-// Start gating is disabled on native; only the end/silence threshold of 1.5 dB
+// Start gating is disabled on native; only the end/silence threshold of ~1.3 dB
 // is enforced. If the native timing payload includes overrides, we adopt them
 // on the fly for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
   // Start gating is disabled; we rely solely on the end/silence threshold.
 };
-const NATIVE_SILENCE_END_THRESHOLD_DB = 1.5;
+const NATIVE_SILENCE_END_THRESHOLD_DB = 1.3;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const RMS_DISPLAY_INTERVAL_MS = 100;
 const RMS_STALE_MS = 550;
+const RMS_ROLLING_WINDOW_SAMPLES = 5;
 const RMS_SHORT_WINDOW_MS = 350;
+const SILENCE_BELOW_SUSTAIN_MS = 120;
 const POST_SILENCE_MS = 1000;
 const LISTENING_WATCHDOG_MS = 8000;
 const NO_RMS_HINT_MS = 1500;
@@ -79,9 +81,12 @@ const rmsDebugState = {
   maxDb: null,
   lastUpdateMs: 0,
   shortSamples: [],
-  shortAvgDb: null
+  shortAvgDb: null,
+  rollingSamples: [],
+  rollingAvgDb: null
 };
 let postSilenceDeadlineMs = null;
+let silenceBelowSinceMs = null;
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -280,6 +285,7 @@ function resetTimingIndicator() {
   clearPostSilenceTimer();
   setTimingIndicator("idle");
   speechDetectedForAttempt = false;
+  silenceBelowSinceMs = null;
 }
 
 // Temporary RMS debug helpers while tuning speech thresholds.
@@ -296,7 +302,10 @@ function resetRmsDebugState() {
   rmsDebugState.lastUpdateMs = 0;
   rmsDebugState.shortSamples = [];
   rmsDebugState.shortAvgDb = null;
+  rmsDebugState.rollingSamples = [];
+  rmsDebugState.rollingAvgDb = null;
   postSilenceDeadlineMs = null;
+  silenceBelowSinceMs = null;
   renderRmsPanel(true);
 }
 
@@ -330,18 +339,20 @@ function handleNativeRmsUpdate(payload) {
   const now = performance.now();
   rmsDebugState.lastDb = payload.rms_db;
   rmsSeenThisAttempt = true;
-  if (
-    recognizing &&
-    !speechDetectedForAttempt &&
-    typeof currentThresholds.rmsVoiceTriggerDb === "number" &&
-    payload.rms_db >= currentThresholds.rmsVoiceTriggerDb
-  ) {
-    speechDetectedForAttempt = true;
-    setTimingIndicator("speech");
-  }
+
   if (typeof payload.avg_rms_db === "number") {
     rmsDebugState.avgDb = payload.avg_rms_db;
   }
+
+  rmsDebugState.rollingSamples.push(payload.rms_db);
+  if (rmsDebugState.rollingSamples.length > RMS_ROLLING_WINDOW_SAMPLES) {
+    rmsDebugState.rollingSamples.shift();
+  }
+  if (rmsDebugState.rollingSamples.length) {
+    const rollingSum = rmsDebugState.rollingSamples.reduce((acc, val) => acc + val, 0);
+    rmsDebugState.rollingAvgDb = rollingSum / rmsDebugState.rollingSamples.length;
+  }
+
   rmsDebugState.shortSamples.push({ ts: now, db: payload.rms_db });
   while (rmsDebugState.shortSamples.length && now - rmsDebugState.shortSamples[0].ts > RMS_SHORT_WINDOW_MS) {
     rmsDebugState.shortSamples.shift();
@@ -365,6 +376,36 @@ function handleNativeRmsUpdate(payload) {
     rmsDebugState.maxDb = typeof rmsDebugState.lastDb === "number" ? rmsDebugState.lastDb : rmsDebugState.maxDb;
   }
 
+  const levelForLogic =
+    typeof rmsDebugState.rollingAvgDb === "number" ? rmsDebugState.rollingAvgDb : payload.rms_db;
+
+  if (
+    recognizing &&
+    !speechDetectedForAttempt &&
+    typeof currentThresholds.rmsVoiceTriggerDb === "number" &&
+    levelForLogic >= currentThresholds.rmsVoiceTriggerDb
+  ) {
+    speechDetectedForAttempt = true;
+    setTimingIndicator("speech");
+    silenceBelowSinceMs = null;
+  }
+
+  const silenceThreshold = NATIVE_SILENCE_END_THRESHOLD_DB;
+  const isBelowSilence = recognizing && typeof silenceThreshold === "number" && levelForLogic < silenceThreshold;
+  if (!recognizing) {
+    silenceBelowSinceMs = null;
+  } else if (isBelowSilence) {
+    if (silenceBelowSinceMs === null) {
+      silenceBelowSinceMs = now;
+    }
+    const sustainedBelow = now - silenceBelowSinceMs >= SILENCE_BELOW_SUSTAIN_MS;
+    if (sustainedBelow && speechDetectedForAttempt && !postSilenceTimerId && !postSilenceDeadlineMs) {
+      enterPostSilenceWindow();
+    }
+  } else {
+    silenceBelowSinceMs = null;
+  }
+
   rmsDebugState.lastUpdateMs = now;
 }
 
@@ -378,7 +419,11 @@ function renderRmsPanel(force) {
   const avgText =
     typeof rmsDebugState.avgDb === "number" ? ` (avg ${rmsDebugState.avgDb.toFixed(1)} dB)` : "";
   const shortAvgText =
-    typeof rmsDebugState.shortAvgDb === "number" ? `${rmsDebugState.shortAvgDb.toFixed(1)} dB (short)` : "—";
+    typeof rmsDebugState.rollingAvgDb === "number"
+      ? `${rmsDebugState.rollingAvgDb.toFixed(1)} dB (5-sample rolling)`
+      : typeof rmsDebugState.shortAvgDb === "number"
+      ? `${rmsDebugState.shortAvgDb.toFixed(1)} dB (short)`
+      : "—";
   const minText =
     typeof rmsDebugState.minDb === "number" ? `${rmsDebugState.minDb.toFixed(1)} dB` : "—";
   const maxText =
