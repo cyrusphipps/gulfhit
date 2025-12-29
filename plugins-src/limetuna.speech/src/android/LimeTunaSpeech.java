@@ -43,11 +43,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     // timing indicator purposes (not an ASR gate).
     private static final float RMS_VOICE_TRIGGER_DB = -2.0f;
 
-    // Recognizer RMS values typically floor around -2 dB. Consider values
-    // >= ~3-4 dB as the beginning of speech, and drop below ~2-3 dB as silence.
-    private static final float RMS_START_THRESHOLD_DB = 3.4f;
+    // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
+    private static final float RMS_START_THRESHOLD_DB = -1000f;
     private static final float RMS_END_THRESHOLD_DB = 1.5f;
-    private static final long POST_SILENCE_MS = 1200L;
+    private static final long POST_SILENCE_MS = 1000L;
     private static final long MAX_UTTERANCE_MS = 3300L;
     private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
 
@@ -753,11 +752,9 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         switch (listeningState) {
             case IDLE:
-                if (rmsdB >= thresholds.rmsStartThresholdDb) {
-                    listeningState = ListeningState.SPEECH;
-                    ensureRmsSpeechStart(now);
-                    cancelSilenceTimer(true);
-                }
+                listeningState = ListeningState.SPEECH;
+                ensureRmsSpeechStart(now);
+                cancelSilenceTimer(true);
                 break;
             case SPEECH:
                 if (rmsdB < thresholds.rmsEndThresholdDb) {
@@ -765,7 +762,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 }
                 break;
             case SILENCE_WINDOW: {
-                if (rmsdB >= thresholds.rmsStartThresholdDb) {
+                if (rmsdB >= thresholds.rmsEndThresholdDb) {
                     cancelSilenceTimer(true);
                     listeningState = ListeningState.SPEECH;
                     ensureRmsSpeechStart(now);
@@ -1301,12 +1298,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         long maxUtterance = defaults.maxUtteranceMs;
 
         if (opts != null) {
-            if (opts.has("rmsStartThresholdDb")) {
-                double candidate = opts.optDouble("rmsStartThresholdDb", Double.NaN);
-                if (!Double.isNaN(candidate)) {
-                    start = Math.min((float) candidate, RMS_START_THRESHOLD_DB);
-                }
-            }
             if (opts.has("rmsEndThresholdDb")) {
                 double candidate = opts.optDouble("rmsEndThresholdDb", Double.NaN);
                 if (!Double.isNaN(candidate)) {

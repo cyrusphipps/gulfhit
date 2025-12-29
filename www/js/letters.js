@@ -5,6 +5,7 @@
 // If the native timing payload includes overrides, we adopt them on the fly.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
+  // Start gating is disabled; we rely solely on the end/silence threshold.
 };
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
@@ -13,7 +14,7 @@ const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const RMS_DISPLAY_INTERVAL_MS = 100;
 const RMS_STALE_MS = 550;
 const RMS_SHORT_WINDOW_MS = 350;
-const POST_SILENCE_MS = 1200;
+const POST_SILENCE_MS = 1000;
 const LISTENING_WATCHDOG_MS = 8000;
 const NO_RMS_HINT_MS = 1500;
 
