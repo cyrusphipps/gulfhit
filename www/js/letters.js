@@ -2,14 +2,14 @@
 
 // Speech timing/indicator thresholds. Keep in sync with the native
 // LimeTunaSpeech constants so we can retune or delete the indicator in one go.
-// Start gating is disabled on native; only the end/silence threshold of ~1.3 dB
+// Start gating is disabled on native; only the end/silence threshold of ~2.5 dB
 // is enforced. If the native timing payload includes overrides, we adopt them
 // on the fly for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
   // Start gating is disabled; we rely solely on the end/silence threshold.
 };
-const NATIVE_SILENCE_END_THRESHOLD_DB = 1.3;
+const NATIVE_SILENCE_END_THRESHOLD_DB = 2.5;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
@@ -19,7 +19,7 @@ const RMS_STALE_MS = 550;
 const RMS_ROLLING_WINDOW_SAMPLES = 5;
 const RMS_SHORT_WINDOW_MS = 350;
 const SILENCE_BELOW_SUSTAIN_MS = 120;
-const POST_SILENCE_MS = 1000;
+const POST_SILENCE_MS = 1300;
 const LISTENING_WATCHDOG_MS = 8000;
 const NO_RMS_HINT_MS = 1500;
 
