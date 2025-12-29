@@ -228,7 +228,11 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         JSONObject toJson(float baselineRmsDb) throws JSONException {
             JSONObject thresholds = new JSONObject();
             thresholds.put("rms_voice_trigger_db", rmsVoiceTriggerDb);
-            thresholds.put("rms_start_threshold_db", rmsStartThresholdDb);
+            if (Float.isInfinite(rmsStartThresholdDb)) {
+                thresholds.put("rms_start_threshold_db", "-Infinity");
+            } else {
+                thresholds.put("rms_start_threshold_db", rmsStartThresholdDb);
+            }
             thresholds.put("rms_end_threshold_db", rmsEndThresholdDb);
             thresholds.put("post_silence_ms", postSilenceMs);
             thresholds.put("max_utterance_ms", maxUtteranceMs);
@@ -1327,6 +1331,9 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 if (!Double.isNaN(candidate) && candidate >= MAX_UTTERANCE_MS) {
                     maxUtterance = (long) candidate;
                 }
+            }
+            if (opts.has("rmsStartThresholdDb")) {
+                Log.i(TAG, "Ignoring rmsStartThresholdDb override; start gate is disabled");
             }
         }
 
