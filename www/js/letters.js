@@ -2,11 +2,14 @@
 
 // Speech timing/indicator thresholds. Keep in sync with the native
 // LimeTunaSpeech constants so we can retune or delete the indicator in one go.
-// If the native timing payload includes overrides, we adopt them on the fly.
+// Start gating is disabled on native; only the end/silence threshold of 1.5 dB
+// is enforced. If the native timing payload includes overrides, we adopt them
+// on the fly for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
   // Start gating is disabled; we rely solely on the end/silence threshold.
 };
+const NATIVE_SILENCE_END_THRESHOLD_DB = 1.5;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
@@ -405,7 +408,7 @@ function renderRmsPanel(force) {
     rmsSilenceStateEl.textContent = silenceText;
   }
   if (rmsScaleEl) {
-    rmsScaleEl.textContent = "Scale: approx −2…10 dB";
+    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate ${NATIVE_SILENCE_END_THRESHOLD_DB} dB`;
   }
   lastRmsRenderMs = now;
 }
@@ -436,10 +439,12 @@ function buildStageLines(timingPayload) {
             : currentThresholds.rmsVoiceTriggerDb
       }
     : currentThresholds;
-  const rmsLabel =
-    thresholds.rmsVoiceTriggerDb !== undefined && thresholds.rmsVoiceTriggerDb !== null
-      ? ` (>${thresholds.rmsVoiceTriggerDb} dB RMS)`
-      : "";
+  const rmsLabelParts = [];
+  if (thresholds.rmsVoiceTriggerDb !== undefined && thresholds.rmsVoiceTriggerDb !== null) {
+    rmsLabelParts.push(`>${thresholds.rmsVoiceTriggerDb} dB RMS`);
+  }
+  rmsLabelParts.push(`start gate disabled; silence gate ${NATIVE_SILENCE_END_THRESHOLD_DB} dB`);
+  const rmsLabel = ` (${rmsLabelParts.join(" · ")})`;
   if (!timingPayload || !timingPayload.native_raw) {
     return [
       "Starting…",
