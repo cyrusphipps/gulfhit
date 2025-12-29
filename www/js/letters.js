@@ -2,14 +2,19 @@
 
 // Speech timing/indicator thresholds. Keep in sync with the native
 // LimeTunaSpeech constants so we can retune or delete the indicator in one go.
-// Start gating is disabled on native; only the end/silence threshold of ~2.5 dB
-// is enforced. If the native timing payload includes overrides, we adopt them
-// on the fly for the indicator.
+// Start gating is disabled on native; the silence gate is derived from the
+// per-attempt rolling baseline + a deviation and capped by the native maximum.
+// If the native timing payload includes overrides, we adopt them on the fly
+// for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
-  rmsVoiceTriggerDb: -2.0 // First RMS level that counts as "speech started"
-  // Start gating is disabled; we rely solely on the end/silence threshold.
+  rmsVoiceTriggerDb: -2.0, // First RMS level that counts as "speech started"
+  rmsEndThresholdDb: 2.5,
+  baselineRmsDb: null,
+  computedEndThresholdDb: 2.5
 };
-const NATIVE_SILENCE_END_THRESHOLD_DB = 2.5;
+const SILENCE_END_BASELINE_DELTA_PERCENT = 0.45;
+const SILENCE_END_BASELINE_DELTA_DB_MIN = 2.0;
+const NATIVE_SILENCE_END_THRESHOLD_DB_MAX = 2.5;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
@@ -22,6 +27,24 @@ const SILENCE_BELOW_SUSTAIN_MS = 120;
 const POST_SILENCE_MS = 1300;
 const LISTENING_WATCHDOG_MS = 8000;
 const NO_RMS_HINT_MS = 1500;
+
+function computeSilenceEndThreshold(thresholds) {
+  const endMax = thresholds && typeof thresholds.rmsEndThresholdDb === "number"
+    ? thresholds.rmsEndThresholdDb
+    : NATIVE_SILENCE_END_THRESHOLD_DB_MAX;
+  const baseline =
+    thresholds && typeof thresholds.baselineRmsDb === "number"
+      ? thresholds.baselineRmsDb
+      : null;
+  if (baseline === null) {
+    return endMax;
+  }
+  const delta = Math.max(
+    SILENCE_END_BASELINE_DELTA_DB_MIN,
+    Math.abs(baseline) * SILENCE_END_BASELINE_DELTA_PERCENT
+  );
+  return Math.min(endMax, baseline + delta);
+}
 
 let LETTER_SEQUENCE = [];
 let currentIndex = 0;
@@ -390,7 +413,10 @@ function handleNativeRmsUpdate(payload) {
     silenceBelowSinceMs = null;
   }
 
-  const silenceThreshold = NATIVE_SILENCE_END_THRESHOLD_DB;
+  const silenceThreshold =
+    typeof currentThresholds.computedEndThresholdDb === "number"
+      ? currentThresholds.computedEndThresholdDb
+      : currentThresholds.rmsEndThresholdDb;
   const isBelowSilence = recognizing && typeof silenceThreshold === "number" && levelForLogic < silenceThreshold;
   if (!recognizing) {
     silenceBelowSinceMs = null;
@@ -453,7 +479,10 @@ function renderRmsPanel(force) {
     rmsSilenceStateEl.textContent = silenceText;
   }
   if (rmsScaleEl) {
-    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate ${NATIVE_SILENCE_END_THRESHOLD_DB} dB`;
+    const silenceGate = typeof currentThresholds.computedEndThresholdDb === "number"
+      ? currentThresholds.computedEndThresholdDb.toFixed(2)
+      : currentThresholds.rmsEndThresholdDb;
+    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate ~${silenceGate} dB (baseline-adaptive)`;
   }
   lastRmsRenderMs = now;
 }
@@ -481,14 +510,25 @@ function buildStageLines(timingPayload) {
         rmsVoiceTriggerDb:
           typeof timingPayload.native_thresholds.rms_voice_trigger_db === "number"
             ? timingPayload.native_thresholds.rms_voice_trigger_db
-            : currentThresholds.rmsVoiceTriggerDb
+            : currentThresholds.rmsVoiceTriggerDb,
+        rmsEndThresholdDb:
+          typeof timingPayload.native_thresholds.rms_end_threshold_db === "number"
+            ? timingPayload.native_thresholds.rms_end_threshold_db
+            : currentThresholds.rmsEndThresholdDb,
+        baselineRmsDb:
+          typeof timingPayload.native_thresholds.baseline_rms_db === "number"
+            ? timingPayload.native_thresholds.baseline_rms_db
+            : currentThresholds.baselineRmsDb
       }
     : currentThresholds;
   const rmsLabelParts = [];
   if (thresholds.rmsVoiceTriggerDb !== undefined && thresholds.rmsVoiceTriggerDb !== null) {
     rmsLabelParts.push(`>${thresholds.rmsVoiceTriggerDb} dB RMS`);
   }
-  rmsLabelParts.push(`start gate disabled; silence gate ${NATIVE_SILENCE_END_THRESHOLD_DB} dB`);
+  const computedEnd = computeSilenceEndThreshold(thresholds);
+  rmsLabelParts.push(
+    `start gate disabled; silence gate ~${computedEnd.toFixed(2)} dB (baseline-adaptive, cap ${NATIVE_SILENCE_END_THRESHOLD_DB_MAX} dB)`
+  );
   const rmsLabel = ` (${rmsLabelParts.join(" · ")})`;
   if (!timingPayload || !timingPayload.native_raw) {
     return [
@@ -575,10 +615,22 @@ function recordJsTiming(key) {
 function updateCurrentThresholds(timingPayload) {
   if (!timingPayload || !timingPayload.native_thresholds) return;
 
-  const { rms_voice_trigger_db } = timingPayload.native_thresholds;
+  const { rms_voice_trigger_db, rms_end_threshold_db, baseline_rms_db } = timingPayload.native_thresholds;
   if (typeof rms_voice_trigger_db === "number") {
     currentThresholds.rmsVoiceTriggerDb = rms_voice_trigger_db;
   }
+  if (typeof rms_end_threshold_db === "number") {
+    currentThresholds.rmsEndThresholdDb = rms_end_threshold_db;
+  }
+  if (typeof baseline_rms_db === "number") {
+    currentThresholds.baselineRmsDb = baseline_rms_db;
+  } else {
+    currentThresholds.baselineRmsDb = null;
+  }
+  currentThresholds.computedEndThresholdDb = computeSilenceEndThreshold({
+    rmsEndThresholdDb: currentThresholds.rmsEndThresholdDb,
+    baselineRmsDb: currentThresholds.baselineRmsDb
+  });
 }
 
 function refreshTimingSummaryAfterAudio() {
