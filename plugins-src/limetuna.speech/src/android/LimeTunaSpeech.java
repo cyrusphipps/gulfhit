@@ -31,6 +31,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.concurrent.atomic.AtomicReference;
 
 public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener {
@@ -45,10 +46,14 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
     private static final float RMS_START_THRESHOLD_DB = -1000f;
-    private static final float RMS_END_THRESHOLD_DB = 1.5f;
-    private static final long POST_SILENCE_MS = 1000L;
+    private static final float RMS_END_THRESHOLD_DB = 2.0f;
+    private static final float RMS_RESUME_DELTA_DB = 0.5f;
+    private static final long POST_SILENCE_MS = 900L;
+    private static final long MIN_POST_SILENCE_MS = 450L;
     private static final long MAX_UTTERANCE_MS = 3300L;
     private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
+    private static final int RMS_SMOOTH_TAIL_SAMPLES = 6;
+    private static final long SILENCE_HOLD_MS = 220L;
 
     private SpeechRecognizer speechRecognizer;
     private CallbackContext currentCallback;
@@ -85,6 +90,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private static final float RMS_AVG_ALPHA = 0.2f;
     private boolean recognizerResetPending = false;
     private int consecutiveZeroRmsWindows = 0;
+    private long belowEndThresholdSinceMs = 0L;
     private final AtomicReference<ThresholdConfig> thresholdConfig =
             new AtomicReference<>(ThresholdConfig.defaults());
 
@@ -97,6 +103,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     private static class RmsStats {
         float lastRmsDb = Float.NaN;
+        float smoothedRmsDb = Float.NaN;
         float avgRmsDb = Float.NaN;
         float minRmsDb = Float.NaN;
         float maxRmsDb = Float.NaN;
@@ -109,6 +116,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         void reset() {
             lastRmsDb = Float.NaN;
+            smoothedRmsDb = Float.NaN;
             avgRmsDb = Float.NaN;
             minRmsDb = Float.NaN;
             maxRmsDb = Float.NaN;
@@ -119,7 +127,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             baselineRmsDb = Float.NaN;
         }
 
-        void update(float rmsDb, long nowMs, ListeningState state) {
+        float update(float rmsDb, long nowMs, ListeningState state) {
             lastRmsDb = rmsDb;
             lastUpdateMs = nowMs;
 
@@ -146,11 +154,34 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 recentRmsDb.removeFirst();
             }
             recentRmsDb.addLast(rmsDb);
+
+            smoothedRmsDb = computeTailAverage(RMS_SMOOTH_TAIL_SAMPLES);
+            return smoothedRmsDb;
+        }
+
+        float getSmoothedRmsDb() {
+            return smoothedRmsDb;
+        }
+
+        private float computeTailAverage(int sampleCount) {
+            if (recentRmsDb.isEmpty() || sampleCount <= 0) {
+                return lastRmsDb;
+            }
+            double sum = 0;
+            int count = 0;
+            Iterator<Float> it = recentRmsDb.descendingIterator();
+            while (it.hasNext() && count < sampleCount) {
+                sum += it.next();
+                count++;
+            }
+            if (count == 0) return lastRmsDb;
+            return (float) (sum / count);
         }
 
         JSONObject toJson() throws JSONException {
             JSONObject obj = new JSONObject();
             if (!Float.isNaN(lastRmsDb)) obj.put("last_rms_db", lastRmsDb);
+            if (!Float.isNaN(smoothedRmsDb)) obj.put("smoothed_rms_db", smoothedRmsDb);
             if (!Float.isNaN(avgRmsDb)) obj.put("avg_rms_db", avgRmsDb);
             if (!Float.isNaN(minRmsDb)) obj.put("min_rms_db", minRmsDb);
             if (!Float.isNaN(maxRmsDb)) obj.put("max_rms_db", maxRmsDb);
@@ -199,29 +230,45 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private static class ThresholdConfig {
         final float rmsStartThresholdDb;
         final float rmsEndThresholdDb;
+        final float rmsResumeDeltaDb;
         final long postSilenceMs;
+        final long minPostSilenceMs;
         final long maxUtteranceMs;
         final float rmsVoiceTriggerDb;
+        final int rmsSmoothTailSamples;
+        final long silenceHoldMs;
 
         private ThresholdConfig(float rmsStartThresholdDb,
                                 float rmsEndThresholdDb,
+                                float rmsResumeDeltaDb,
                                 long postSilenceMs,
+                                long minPostSilenceMs,
                                 long maxUtteranceMs,
-                                float rmsVoiceTriggerDb) {
+                                float rmsVoiceTriggerDb,
+                                int rmsSmoothTailSamples,
+                                long silenceHoldMs) {
             this.rmsStartThresholdDb = rmsStartThresholdDb;
             this.rmsEndThresholdDb = rmsEndThresholdDb;
+            this.rmsResumeDeltaDb = rmsResumeDeltaDb;
             this.postSilenceMs = postSilenceMs;
+            this.minPostSilenceMs = minPostSilenceMs;
             this.maxUtteranceMs = maxUtteranceMs;
             this.rmsVoiceTriggerDb = rmsVoiceTriggerDb;
+            this.rmsSmoothTailSamples = rmsSmoothTailSamples;
+            this.silenceHoldMs = silenceHoldMs;
         }
 
         static ThresholdConfig defaults() {
             return new ThresholdConfig(
                     RMS_START_THRESHOLD_DB,
                     RMS_END_THRESHOLD_DB,
+                    RMS_RESUME_DELTA_DB,
                     POST_SILENCE_MS,
+                    MIN_POST_SILENCE_MS,
                     MAX_UTTERANCE_MS,
-                    RMS_VOICE_TRIGGER_DB
+                    RMS_VOICE_TRIGGER_DB,
+                    RMS_SMOOTH_TAIL_SAMPLES,
+                    SILENCE_HOLD_MS
             );
         }
 
@@ -234,8 +281,12 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 thresholds.put("rms_start_threshold_db", rmsStartThresholdDb);
             }
             thresholds.put("rms_end_threshold_db", rmsEndThresholdDb);
+            thresholds.put("rms_resume_delta_db", rmsResumeDeltaDb);
             thresholds.put("post_silence_ms", postSilenceMs);
+            thresholds.put("min_post_silence_ms", minPostSilenceMs);
             thresholds.put("max_utterance_ms", maxUtteranceMs);
+            thresholds.put("rms_smooth_tail_samples", rmsSmoothTailSamples);
+            thresholds.put("silence_hold_ms", silenceHoldMs);
             if (!Float.isNaN(baselineRmsDb)) {
                 thresholds.put("baseline_rms_db", baselineRmsDb);
             }
@@ -506,6 +557,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 lastRmsDispatchMs = 0L;
                 lastPartialResults = null;
                 consecutiveZeroRmsWindows = 0;
+                belowEndThresholdSinceMs = 0L;
                 sessionPeakRmsDb = Float.NEGATIVE_INFINITY;
                 adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
 
@@ -747,41 +799,52 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     public void onRmsChanged(float rmsdB) {
         Log.v(TAG, "onRmsChanged: " + rmsdB);
         ThresholdConfig thresholds = thresholdConfig.get();
-        sessionPeakRmsDb = Math.max(sessionPeakRmsDb, rmsdB);
+        long now = SystemClock.elapsedRealtime();
+        float smoothedRmsDb = rmsStats.update(rmsdB, now, listeningState);
+        float detectionRmsDb = Float.isNaN(smoothedRmsDb) ? rmsdB : smoothedRmsDb;
+
+        sessionPeakRmsDb = Math.max(sessionPeakRmsDb, detectionRmsDb);
         if (!Float.isInfinite(sessionPeakRmsDb)) {
-            float candidate = sessionPeakRmsDb * 0.8f; // 20% below peak
+            float candidate = detectionRmsDb * 0.8f; // 20% below peak
             float floored = Math.max(candidate, -5f);
             adaptiveEndThresholdDb = Math.min(thresholds.rmsEndThresholdDb, floored);
         } else {
             adaptiveEndThresholdDb = thresholds.rmsEndThresholdDb;
         }
-        if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && rmsdB > thresholds.rmsVoiceTriggerDb) {
+        if (currentTiming != null && currentTiming.nativeFirstRmsAboveThresholdMs == 0 && detectionRmsDb > thresholds.rmsVoiceTriggerDb) {
             currentTiming.nativeFirstRmsAboveThresholdMs = SystemClock.elapsedRealtime();
-            Log.d(TAG, "LimeTunaSpeech stage=rms_threshold t=" + currentTiming.nativeFirstRmsAboveThresholdMs + " rmsdB=" + rmsdB);
+            Log.d(TAG, "LimeTunaSpeech stage=rms_threshold t=" + currentTiming.nativeFirstRmsAboveThresholdMs + " rmsdB=" + detectionRmsDb);
         }
 
         if (!isListening) {
             return;
         }
 
-        long now = SystemClock.elapsedRealtime();
-
         switch (listeningState) {
             case IDLE:
                 listeningState = ListeningState.SPEECH;
                 ensureRmsSpeechStart(now);
                 cancelSilenceTimer(true);
+                belowEndThresholdSinceMs = 0L;
                 break;
             case SPEECH:
-                if (rmsdB < adaptiveEndThresholdDb) {
-                    beginSilenceWindow(now);
+                if (detectionRmsDb < adaptiveEndThresholdDb) {
+                    if (belowEndThresholdSinceMs == 0L) {
+                        belowEndThresholdSinceMs = now;
+                    }
+                    if ((now - belowEndThresholdSinceMs) >= thresholds.silenceHoldMs) {
+                        beginSilenceWindow(now);
+                    }
+                } else {
+                    belowEndThresholdSinceMs = 0L;
                 }
                 break;
             case SILENCE_WINDOW: {
-                if (rmsdB >= adaptiveEndThresholdDb) {
+                if (detectionRmsDb >= adaptiveEndThresholdDb + thresholds.rmsResumeDeltaDb) {
                     cancelSilenceTimer(true);
                     listeningState = ListeningState.SPEECH;
                     ensureRmsSpeechStart(now);
+                    belowEndThresholdSinceMs = 0L;
                 }
                 break;
             }
@@ -791,7 +854,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
 
         if (isListening) {
-            sendRmsUpdateToCallback(rmsdB);
+            sendRmsUpdateToCallback(rmsdB, detectionRmsDb, now);
         }
 
         if (rmsdB == 0f) {
@@ -1125,6 +1188,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         }
 
         listeningState = ListeningState.SILENCE_WINDOW;
+        belowEndThresholdSinceMs = 0L;
         if (currentTiming != null && currentTiming.nativeRmsSpeechEndMs == 0) {
             currentTiming.nativeRmsSpeechEndMs = now;
         }
@@ -1134,6 +1198,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         if (handler != null) {
             ThresholdConfig thresholds = thresholdConfig.get();
+            long postSilenceDelayMs = computePostSilenceDelay(now, thresholds);
             silenceTimeoutRunnable = new Runnable() {
                 @Override
                 public void run() {
@@ -1149,8 +1214,26 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                     stopListeningInternal(false);
                 }
             };
-            handler.postDelayed(silenceTimeoutRunnable, thresholds.postSilenceMs);
+            handler.postDelayed(silenceTimeoutRunnable, postSilenceDelayMs);
         }
+    }
+
+    private long computePostSilenceDelay(long now, ThresholdConfig thresholds) {
+        long speechStart = 0L;
+        if (currentTiming != null) {
+            speechStart = currentTiming.nativeRmsSpeechStartMs > 0
+                    ? currentTiming.nativeRmsSpeechStartMs
+                    : currentTiming.nativeBeginningOfSpeechMs;
+        }
+        long speechDuration = speechStart > 0 ? Math.max(0, now - speechStart) : 0L;
+        long adaptive = thresholds.postSilenceMs;
+        if (speechDuration > 0) {
+            long reduction = speechDuration / 3;
+            adaptive = Math.max(thresholds.minPostSilenceMs, thresholds.postSilenceMs - reduction);
+        } else {
+            adaptive = Math.max(thresholds.minPostSilenceMs, thresholds.postSilenceMs);
+        }
+        return adaptive;
     }
 
     private void cancelSilenceTimer(boolean clearEndTime) {
@@ -1158,6 +1241,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             handler.removeCallbacks(silenceTimeoutRunnable);
         }
         silenceTimeoutRunnable = null;
+        belowEndThresholdSinceMs = 0L;
         if (clearEndTime && currentTiming != null && listeningState == ListeningState.SILENCE_WINDOW) {
             currentTiming.nativeRmsSpeechEndMs = 0;
         }
@@ -1209,15 +1293,13 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         listeningState = ListeningState.IDLE;
         stopIssued = false;
         consecutiveZeroRmsWindows = 0;
+        belowEndThresholdSinceMs = 0L;
     }
 
-    private void sendRmsUpdateToCallback(float rmsdB) {
+    private void sendRmsUpdateToCallback(float rmsdB, float smoothedRmsDb, long now) {
         if (currentCallback == null) {
             return;
         }
-
-        long now = SystemClock.elapsedRealtime();
-        rmsStats.update(rmsdB, now, listeningState);
 
         if (lastRmsDispatchMs > 0 && (now - lastRmsDispatchMs) < RMS_DISPATCH_INTERVAL_MS) {
             return;
@@ -1228,6 +1310,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             JSONObject obj = new JSONObject();
             obj.put("type", "rms");
             obj.put("rms_db", rmsStats.lastRmsDb);
+            if (!Float.isNaN(smoothedRmsDb)) obj.put("smoothed_rms_db", smoothedRmsDb);
             if (!Float.isNaN(rmsStats.avgRmsDb)) obj.put("avg_rms_db", rmsStats.avgRmsDb);
             if (!Float.isNaN(rmsStats.minRmsDb)) obj.put("min_rms_db", rmsStats.minRmsDb);
             if (!Float.isNaN(rmsStats.maxRmsDb)) obj.put("max_rms_db", rmsStats.maxRmsDb);
@@ -1311,6 +1394,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         float start = defaults.rmsStartThresholdDb;
         float end = defaults.rmsEndThresholdDb;
         long postSilence = defaults.postSilenceMs;
+        long minPostSilence = defaults.minPostSilenceMs;
         long maxUtterance = defaults.maxUtteranceMs;
 
         if (opts != null) {
@@ -1322,8 +1406,14 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
             if (opts.has("postSilenceMs")) {
                 double candidate = opts.optDouble("postSilenceMs", Double.NaN);
-                if (!Double.isNaN(candidate) && candidate >= POST_SILENCE_MS) {
+                if (!Double.isNaN(candidate) && candidate >= MIN_POST_SILENCE_MS) {
                     postSilence = (long) candidate;
+                }
+            }
+            if (opts.has("minPostSilenceMs")) {
+                double candidate = opts.optDouble("minPostSilenceMs", Double.NaN);
+                if (!Double.isNaN(candidate) && candidate >= MIN_POST_SILENCE_MS) {
+                    minPostSilence = (long) candidate;
                 }
             }
             if (opts.has("maxUtteranceMs")) {
@@ -1337,11 +1427,13 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
         }
 
-        ThresholdConfig newConfig = new ThresholdConfig(start, end, postSilence, maxUtterance, RMS_VOICE_TRIGGER_DB);
+        postSilence = Math.max(postSilence, minPostSilence);
+        ThresholdConfig newConfig = new ThresholdConfig(start, end, RMS_RESUME_DELTA_DB, postSilence, minPostSilence, maxUtterance, RMS_VOICE_TRIGGER_DB, RMS_SMOOTH_TAIL_SAMPLES, SILENCE_HOLD_MS);
         thresholdConfig.set(newConfig);
         Log.i(TAG, "Threshold config updated start=" + start +
                 " end=" + end +
                 " postSilenceMs=" + postSilence +
+                " minPostSilenceMs=" + minPostSilence +
                 " maxUtteranceMs=" + maxUtterance);
     }
 
