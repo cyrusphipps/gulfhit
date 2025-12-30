@@ -95,6 +95,7 @@ let speechDetectedForAttempt = false;
 let rmsSeenThisAttempt = false;
 let listeningWatchdogTimerId = null;
 let noRmsHintTimerId = null;
+let noMatchSpeechRetryUsed = false;
 const rmsDebugState = {
   timerId: null,
   active: false,
@@ -827,6 +828,7 @@ function startNewGame() {
 
 function updateUIForCurrentLetter() {
   attemptCount = 0;
+  noMatchSpeechRetryUsed = false;
   resetTimingIndicator();
 
   const total = LETTER_SEQUENCE.length;
@@ -1020,6 +1022,17 @@ function startListeningForCurrentLetter() {
         clearNoRmsHintTimer();
         recognizing = false;
 
+        let parsedErrorPayload = null;
+        if (err && typeof err === "object") {
+          parsedErrorPayload = err;
+        } else if (typeof err === "string" && err.startsWith("{")) {
+          try {
+            parsedErrorPayload = JSON.parse(err);
+          } catch (parseErr) {
+            parsedErrorPayload = null;
+          }
+        }
+
         const hadSpeechDetection = speechDetectedForAttempt;
         const sawAnyRms = rmsSeenThisAttempt;
         const now = performance.now();
@@ -1065,6 +1078,22 @@ function startListeningForCurrentLetter() {
 
         if (code === "NO_MATCH") {
           const lines = [`No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms).`];
+          const allResults =
+            parsedErrorPayload && Array.isArray(parsedErrorPayload.allResults)
+              ? parsedErrorPayload.allResults
+              : [];
+          if (hadSpeechDetection && allResults.length === 0 && !noMatchSpeechRetryUsed) {
+            noMatchSpeechRetryUsed = true;
+            statusEl.textContent = [
+              lines[0],
+              "Detected speech but received no transcript; retrying immediately without counting an incorrect attempt.",
+              engineBreakdownText,
+              `Timings: ${summaryText}`
+            ].join("\n");
+            console.warn("[letters] NO_MATCH with speech detected but empty results; retrying once");
+            startListeningForCurrentLetter();
+            return;
+          }
           if (!sawAnyRms) {
             lines.push(
               "We never received microphone levels from the speech engine. Check mic permissions or your device input and try again.",

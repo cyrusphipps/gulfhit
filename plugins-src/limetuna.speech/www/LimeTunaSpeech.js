@@ -184,12 +184,28 @@ var LimeTunaSpeech = (function () {
     if (!attemptId || !thresholds) return;
     if (_attemptThresholdLogged.has(attemptId)) return;
     _attemptThresholdLogged.add(attemptId);
+    var effectivePostSilence = thresholds.post_silence_ms_effective !== undefined
+      ? thresholds.post_silence_ms_effective
+      : thresholds.post_silence_ms;
+    var adaptiveEnd = thresholds.adaptive_end_threshold_db !== undefined
+      ? thresholds.adaptive_end_threshold_db
+      : thresholds.rms_end_threshold_db;
+    var noPartialAdjust = thresholds.no_partial_adjust_active !== undefined
+      ? thresholds.no_partial_adjust_active
+      : null;
+    var postSilenceBoost = thresholds.no_partial_post_silence_boost_ms !== undefined
+      ? thresholds.no_partial_post_silence_boost_ms
+      : null;
     console.info(
       "[LimeTunaSpeech] attempt " + attemptId +
       " thresholds start=" + thresholds.rms_start_threshold_db +
       " end=" + thresholds.rms_end_threshold_db +
+      " endEffective=" + adaptiveEnd +
       " postSilenceMs=" + thresholds.post_silence_ms +
+      " postSilenceEffectiveMs=" + effectivePostSilence +
+      (postSilenceBoost !== null ? " postSilenceBoostMs=" + postSilenceBoost : "") +
       " maxUtteranceMs=" + thresholds.max_utterance_ms +
+      (noPartialAdjust !== null ? " noPartialAdjustActive=" + noPartialAdjust : "") +
       " baseline=" + (thresholds.baseline_rms_db !== undefined ? thresholds.baseline_rms_db : "n/a")
     );
   }
@@ -202,6 +218,17 @@ var LimeTunaSpeech = (function () {
       return;
     }
     var thresholds = evt && evt.timing && evt.timing.native_thresholds ? evt.timing.native_thresholds : {};
+    var adaptiveEnd = thresholds.adaptive_end_threshold_db !== undefined
+      ? thresholds.adaptive_end_threshold_db
+      : thresholds.rms_end_threshold_db;
+    var effectivePostSilence = thresholds.post_silence_ms_effective !== undefined
+      ? thresholds.post_silence_ms_effective
+      : thresholds.post_silence_ms;
+    var partialSeen = extras.partial_results_seen === true;
+    var partialCount = typeof extras.partial_results_count === "number" ? extras.partial_results_count : null;
+    var partialLabel = partialCount !== null
+      ? (partialSeen ? "seen" : "none") + " (" + partialCount + ")"
+      : (partialSeen ? "seen" : "n/a");
     var tail = Array.isArray(extras.rms_tail)
       ? extras.rms_tail.slice()
       : (_attemptRmsHistory.get(attemptId) || []).slice();
@@ -213,8 +240,11 @@ var LimeTunaSpeech = (function () {
       " baseline=" + (thresholds.baseline_rms_db !== undefined ? thresholds.baseline_rms_db : "n/a") +
       " start=" + thresholds.rms_start_threshold_db +
       " end=" + thresholds.rms_end_threshold_db +
+      " endEffective=" + adaptiveEnd +
       " postSilenceMs=" + thresholds.post_silence_ms +
-      " maxUtteranceMs=" + thresholds.max_utterance_ms
+      " postSilenceEffectiveMs=" + effectivePostSilence +
+      " maxUtteranceMs=" + thresholds.max_utterance_ms +
+      " partials=" + partialLabel
     );
   }
 
