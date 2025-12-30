@@ -15,7 +15,7 @@ const PHONETIC_MAP = {
   K: ["k", "kay"],
   L: ["l", "el"],
   M: ["m", "em"],
-  N: ["n", "en"],
+  N: ["n", "en", "in", "inn", "ehn"],
   O: ["o", "oh"],
   P: ["p", "pee"],
   Q: ["q", "cue", "queue"],
@@ -112,7 +112,8 @@ function chooseLetterFromResults(allResults, expectedLetter) {
 
     // Bias toward the expected letter
     if (L === expectedUpper) {
-      letterScore += 1.0;
+      var lowConfidenceBonus = letterScore <= 2 ? 1.5 : 1.0;
+      letterScore += 1.0 * lowConfidenceBonus;
     }
 
     if (letterScore > bestScore) {
@@ -127,6 +128,32 @@ function chooseLetterFromResults(allResults, expectedLetter) {
   }
   return null;
 }
+
+function runInternalChecks() {
+  try {
+    if (!console || typeof console.assert !== "function") return;
+
+    var scoredN = scorePhraseForLetter("in", "N");
+    console.assert(
+      scoredN >= 3,
+      "[LimeTunaSpeech] scorePhraseForLetter should recognize 'in' as N, got",
+      scoredN
+    );
+
+    var chosenN = chooseLetterFromResults(["in"], "n");
+    console.assert(
+      chosenN === "N",
+      "[LimeTunaSpeech] chooseLetterFromResults should resolve 'in' to N when expected=N, got",
+      chosenN
+    );
+  } catch (err) {
+    if (console && typeof console.error === "function") {
+      console.error("[LimeTunaSpeech] internal checks failed:", err);
+    }
+  }
+}
+
+runInternalChecks();
 
 var LimeTunaSpeech = (function () {
   var _opts = {
