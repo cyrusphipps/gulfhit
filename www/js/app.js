@@ -35,8 +35,9 @@ function initLimetunaPortal() {
       console.log("Selected:", game.id);
 
       if (game.id === "letters") {
-        // Navigate to the letters game page
         window.location.href = "letters.html";
+      } else if (game.id === "animals") {
+        window.location.href = "animals.html";
       } else {
         // For now, keep other tiles as simple modals
         openGameModal(game, index);

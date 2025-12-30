@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Gulfhit 1.2.6 · Letters</title>
+  <title>Gulfhit 1.2.6 · Animals</title>
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
@@ -12,32 +12,35 @@
 <!-- MUST load cordova.js here too -->
 <script src="cordova.js"></script>
 
-<!-- Letters game logic -->
-<script src="js/letters.js" defer></script>
+<!-- Animals game logic -->
+<script src="js/animals.js" defer></script>
 
 </head>
 <body>
-  <div id="lettersApp" class="letters-app">
+  <div id="animalsApp" class="animals-app">
     <header class="app-header">
       <h1 class="app-title">Gulfhit 1.2.6</h1>
-      <p class="app-subtitle">Letters game – say the letter</p>
+      <p class="app-subtitle">Animals game – say the animal</p>
     </header>
 
-    <main class="letters-main">
-      <section class="letters-card">
-        <div class="letters-progress" id="lettersProgress">
+    <main class="animals-main">
+      <section class="animals-card">
+        <div class="animals-progress" id="animalsProgress">
           1 / 10
         </div>
 
-        <div class="letters-current-letter" id="currentLetter">
-          A
+        <div class="animal-figure">
+          <div class="animal-image-frame">
+            <img id="animalImage" class="animal-image" src="img/animals/dog.svg" alt="Dog" />
+          </div>
+          <div class="animal-name" id="animalName">Dog</div>
         </div>
 
-        <div class="letters-status" id="lettersStatus">
+        <div class="animals-status" id="animalsStatus">
           Listening…
         </div>
 
-        <div class="letters-timing-panel" id="lettersTiming">
+        <div class="animals-timing-panel" id="animalsTiming">
           <div class="timing-stage-row">
             <div id="timingIndicator" class="timing-indicator timing-idle"></div>
             <div class="timing-stage" id="timingStage">Timing idle</div>
@@ -46,7 +49,7 @@
         </div>
 
         <!-- Temporary debug RMS panel; remove when microphone tuning is finished. -->
-        <div class="letters-rms-panel rms-idle" id="lettersRmsPanel">
+        <div class="animals-rms-panel rms-idle" id="animalsRmsPanel">
           <div class="rms-title">Debug RMS</div>
           <div class="rms-values">
             <div id="rmsNow">RMS now: —</div>
@@ -57,22 +60,22 @@
           </div>
         </div>
 
-        <div class="letters-feedback" id="lettersFeedback">
+        <div class="animals-feedback" id="animalsFeedback">
           <!-- Correct / wrong feedback here -->
         </div>
 
-        <div class="letters-final-score hidden" id="finalScore">
+        <div class="animals-final-score hidden" id="finalScore">
           <!-- Final score will appear here -->
         </div>
 
-<div class="letters-controls">
-  <button id="restartGameBtn" class="btn-secondary hidden">
-    Restart game
-  </button>
-  <button id="backToHomeBtn" class="btn-tertiary">
-    ← Back to games
-  </button>
-</div>
+        <div class="animals-controls">
+          <button id="restartGameBtn" class="btn-secondary hidden">
+            Restart game
+          </button>
+          <button id="backToHomeBtn" class="btn-tertiary">
+            ← Back to games
+          </button>
+        </div>
 
       </section>
     </main>

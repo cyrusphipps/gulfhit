@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240" role="img" aria-labelledby="title desc">
+  <title>Bird</title>
+  <desc>Happy bird illustration</desc>
+  <defs>
+    <linearGradient id="bgBird" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e8fff3"/>
+      <stop offset="100%" stop-color="#c9f7d2"/>
+    </linearGradient>
+  </defs>
+  <rect width="240" height="240" rx="32" fill="url(#bgBird)" />
+  <circle cx="120" cy="120" r="84" fill="#fff" stroke="#89d69f" stroke-width="6"/>
+  <text x="120" y="140" font-size="110" text-anchor="middle">🐦</text>
+</svg>
