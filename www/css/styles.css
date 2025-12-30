@@ -241,23 +241,26 @@ body {
 }
 
 
-/* Letters game layout */
+/* Letters & Animals game layout */
 
-.letters-app {
+.letters-app,
+.animals-app {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   padding: 16px;
 }
 
-.letters-main {
+.letters-main,
+.animals-main {
   flex: 1;
   display: flex;
   justify-content: center;
   align-items: center;
 }
 
-.letters-card {
+.letters-card,
+.animals-card {
   background: #ffffff;
   border-radius: var(--radius-large);
   box-shadow: var(--shadow-soft);
@@ -267,10 +270,43 @@ body {
   text-align: center;
 }
 
-.letters-progress {
+.letters-progress,
+.animals-progress {
   font-size: 0.95rem;
   opacity: 0.7;
   margin-bottom: 12px;
+}
+
+.animal-figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.animal-image-frame {
+  width: 220px;
+  height: 220px;
+  border-radius: var(--radius-medium);
+  background: #f5f7fb;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.animal-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.animal-name {
+  font-size: 2.2rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .letters-current-letter {
@@ -280,26 +316,30 @@ body {
   letter-spacing: 0.08em;
 }
 
-.letters-status {
+.letters-status,
+.animals-status {
   font-size: 1rem;
   margin-bottom: 8px;
   opacity: 0.8;
 }
 
-.letters-feedback {
+.letters-feedback,
+.animals-feedback {
   min-height: 24px;
   font-size: 1.1rem;
   font-weight: 600;
   margin-bottom: 12px;
 }
 
-.letters-final-score {
+.letters-final-score,
+.animals-final-score {
   margin-top: 8px;
   font-size: 1.2rem;
   font-weight: 600;
 }
 
-.letters-timing-panel {
+.letters-timing-panel,
+.animals-timing-panel {
   margin: 10px auto 6px;
   padding: 10px 12px;
   background: #f7f9fb;
@@ -351,7 +391,8 @@ body {
 }
 
 /* Temporary RMS debug panel (remove when speech tuning completes) */
-.letters-rms-panel {
+.letters-rms-panel,
+.animals-rms-panel {
   margin: 6px auto 10px;
   padding: 8px 12px;
   background: #f4f6fa;
@@ -363,12 +404,14 @@ body {
   transition: opacity 0.2s ease, color 0.2s ease;
 }
 
-.letters-rms-panel.rms-idle {
+.letters-rms-panel.rms-idle,
+.animals-rms-panel.rms-idle {
   opacity: 0.6;
   color: #6c737c;
 }
 
-.letters-rms-panel.rms-active {
+.letters-rms-panel.rms-active,
+.animals-rms-panel.rms-active {
   opacity: 1;
 }
 
@@ -388,7 +431,8 @@ body {
   font-size: 0.85rem;
 }
 
-.letters-controls {
+.letters-controls,
+.animals-controls {
   margin-top: 16px;
   display: flex;
   justify-content: center;
