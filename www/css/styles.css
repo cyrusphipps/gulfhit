@@ -303,12 +303,6 @@ body {
   object-fit: contain;
 }
 
-.animal-name {
-  font-size: 2.2rem;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-}
-
 .letters-current-letter {
   font-size: 10rem; /* was 5rem; now doubled for better visibility */
   font-weight: 700;
