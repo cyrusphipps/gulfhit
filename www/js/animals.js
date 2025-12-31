@@ -1,16 +1,41 @@
 // animals.js – simple speech game modeled after Letters
 
 const ANIMALS = [
-  { name: "Dog", image: "img/animals/dog.svg", keywords: ["dog", "puppy"] },
-  { name: "Cat", image: "img/animals/cat.svg", keywords: ["cat", "kitten"] },
-  { name: "Fish", image: "img/animals/fish.svg", keywords: ["fish"] },
-  { name: "Bird", image: "img/animals/bird.svg", keywords: ["bird", "parrot"] },
-  { name: "Spider", image: "img/animals/spider.svg", keywords: ["spider"] },
-  { name: "Horse", image: "img/animals/horse.svg", keywords: ["horse", "pony"] }
+  {
+    name: "Dog",
+    images: ["img/animals/dog1.webp", "img/animals/dog2.webp", "img/animals/dog3.webp"],
+    keywords: ["dog", "puppy"]
+  },
+  {
+    name: "Cat",
+    images: ["img/animals/cat1.webp", "img/animals/cat2.webp", "img/animals/cat3.webp"],
+    keywords: ["cat", "kitten"]
+  },
+  {
+    name: "Fish",
+    images: ["img/animals/fish1.webp", "img/animals/fish2.webp", "img/animals/fish3.webp"],
+    keywords: ["fish"]
+  },
+  {
+    name: "Bird",
+    images: ["img/animals/bird1.webp", "img/animals/bird2.webp", "img/animals/bird3.webp"],
+    keywords: ["bird", "parrot"]
+  },
+  {
+    name: "Spider",
+    images: ["img/animals/spider1.webp", "img/animals/spider2.webp", "img/animals/spider3.webp"],
+    keywords: ["spider"]
+  },
+  {
+    name: "Horse",
+    images: ["img/animals/horse1.webp", "img/animals/horse2.webp", "img/animals/horse3.webp"],
+    keywords: ["horse", "pony"]
+  }
 ];
 
 const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
+const MAX_ANIMAL_OCCURRENCES = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 
 let animalSequence = [];
@@ -29,7 +54,6 @@ let finalScoreEl;
 let backToHomeBtn;
 let restartGameBtn;
 let animalImageEl;
-let animalNameEl;
 
 let soundCorrectEl;
 let soundWrongEl;
@@ -46,14 +70,53 @@ function shuffleArray(arr) {
 }
 
 function buildAnimalSequence() {
-  const result = [];
-  let pool = shuffleArray(ANIMALS);
+  const imagePool = [];
 
-  while (result.length < TOTAL_ROUNDS) {
-    if (pool.length === 0) {
-      pool = shuffleArray(ANIMALS);
+  ANIMALS.forEach((animal) => {
+    const variants = Array.isArray(animal.images) && animal.images.length ? animal.images : [animal.image];
+    variants.forEach((imagePath) => {
+      imagePool.push({ animal, image: imagePath });
+    });
+  });
+
+  let shuffledPool = shuffleArray(imagePool);
+  const animalCounts = new Map();
+  const result = [];
+
+  for (const entry of shuffledPool) {
+    const currentCount = animalCounts.get(entry.animal.name) || 0;
+    if (currentCount >= MAX_ANIMAL_OCCURRENCES) continue;
+
+    result.push({
+      ...entry.animal,
+      image: entry.image
+    });
+    animalCounts.set(entry.animal.name, currentCount + 1);
+
+    if (result.length >= TOTAL_ROUNDS) break;
+  }
+
+  if (result.length < TOTAL_ROUNDS) {
+    const remainingPool = imagePool.filter(
+      (entry) =>
+        !result.some((chosen) => chosen.image === entry.image) &&
+        (animalCounts.get(entry.animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
+    );
+
+    shuffledPool = shuffleArray(remainingPool);
+
+    for (const entry of shuffledPool) {
+      const currentCount = animalCounts.get(entry.animal.name) || 0;
+      if (currentCount >= MAX_ANIMAL_OCCURRENCES) continue;
+
+      result.push({
+        ...entry.animal,
+        image: entry.image
+      });
+      animalCounts.set(entry.animal.name, currentCount + 1);
+
+      if (result.length >= TOTAL_ROUNDS) break;
     }
-    result.push(pool.pop());
   }
 
   return result;
@@ -151,6 +214,13 @@ function isAnimalMatch(results, animal) {
   return false;
 }
 
+function getAnimalImage(animal) {
+  if (!animal) return "";
+  if (animal.image) return animal.image;
+  const variants = Array.isArray(animal.images) ? animal.images : [];
+  return variants[0] || "";
+}
+
 function initAnimalsGame() {
   progressEl = document.getElementById("animalsProgress");
   statusEl = document.getElementById("animalsStatus");
@@ -159,7 +229,6 @@ function initAnimalsGame() {
   backToHomeBtn = document.getElementById("backToHomeBtn");
   restartGameBtn = document.getElementById("restartGameBtn");
   animalImageEl = document.getElementById("animalImage");
-  animalNameEl = document.getElementById("animalName");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -173,7 +242,7 @@ function initAnimalsGame() {
     }
   });
 
-  if (!progressEl || !statusEl || !feedbackEl || !finalScoreEl || !animalImageEl || !animalNameEl) {
+  if (!progressEl || !statusEl || !feedbackEl || !finalScoreEl || !animalImageEl) {
     console.error("Animals screen elements not found.");
     return;
   }
@@ -213,7 +282,7 @@ function startNewGame() {
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
-  statusEl.textContent = "Preparing microphone…";
+  statusEl.textContent = "Get ready to say what you see!";
 
   updateUIForCurrentAnimal();
 
@@ -234,7 +303,7 @@ function startNewGame() {
       function () {
         console.log("LimeTunaSpeech.init success (animals)");
         sttEnabled = true;
-        statusEl.textContent = "Speech ready. Say the animal when you're ready.";
+        statusEl.textContent = "Speech ready. Say what you see when you're ready.";
         startListeningForCurrentAnimal();
       },
       function (err) {
@@ -267,12 +336,18 @@ function updateUIForCurrentAnimal() {
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
-  const animal = animalSequence[currentIndex] || ANIMALS[0];
+  const sequenceAnimal = animalSequence[currentIndex];
+  const fallbackAnimal = ANIMALS[0]
+    ? { ...ANIMALS[0], image: getAnimalImage(ANIMALS[0]) }
+    : null;
+  const animal = sequenceAnimal || fallbackAnimal;
+  const imagePath = getAnimalImage(animal);
 
   progressEl.textContent = `${displayIndex} / ${total}`;
-  animalNameEl.textContent = animal.name;
-  animalImageEl.src = animal.image;
-  animalImageEl.alt = animal.name;
+  if (imagePath) {
+    animalImageEl.src = imagePath;
+  }
+  animalImageEl.alt = (animal && animal.name) || "Animal";
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
 }
@@ -296,7 +371,7 @@ function startListeningForCurrentAnimal() {
 
   recognizing = true;
   const attemptNumber = attemptCount + 1;
-  statusEl.textContent = `Listening for ${animal.name} (${attemptNumber}/${MAX_ATTEMPTS_PER_ANIMAL})…`;
+  statusEl.textContent = `Listening (${attemptNumber}/${MAX_ATTEMPTS_PER_ANIMAL})…`;
 
   try {
     LimeTunaSpeech.startLetter(
@@ -310,7 +385,7 @@ function startListeningForCurrentAnimal() {
 
         const isCorrect = isAnimalMatch(heard, animal);
         console.log("[animals] result", { animal: animal.name, rawText, allResults, isCorrect });
-        statusEl.textContent = `Heard: "${rawText}"`;
+        statusEl.textContent = isCorrect ? "Nice job!" : "Let's try again.";
 
         if (isCorrect) {
           handleCorrect();
@@ -324,7 +399,7 @@ function startListeningForCurrentAnimal() {
         console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
         if (code === "NO_MATCH") {
-          statusEl.textContent = "We couldn't hear that animal clearly. Try again.";
+          statusEl.textContent = "We couldn't hear that clearly. Try again.";
           handleIncorrect();
           return;
         }
@@ -352,7 +427,7 @@ function startListeningForCurrentAnimal() {
 function handleCorrect() {
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
-  statusEl.textContent += "\nPlaying correct sound…";
+  statusEl.textContent = "Great job!";
 
   correctCount++;
 
@@ -370,7 +445,7 @@ function handleIncorrect() {
   if (isRetry) {
     feedbackEl.textContent = "✕ Try again!";
     feedbackEl.style.color = "#c62828";
-    statusEl.textContent += "\nPlaying wrong sound and retrying…";
+    statusEl.textContent = "Give it another shot.";
 
     playSound(soundWrongEl, () => {
       startListeningForCurrentAnimal();
@@ -378,7 +453,7 @@ function handleIncorrect() {
   } else {
     feedbackEl.textContent = "✕ Wrong answer.";
     feedbackEl.style.color = "#c62828";
-    statusEl.textContent += "\nPlaying wrong sound and moving on…";
+    statusEl.textContent = "Moving to the next one.";
 
     playSound(soundWrongEl, () => {
       advanceToNextAnimal();
