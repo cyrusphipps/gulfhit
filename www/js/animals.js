@@ -37,11 +37,12 @@ const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
+const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 7000, // allow longer utterances for this game
-  postSilenceMs: 2000,
-  minPostSilenceMs: 1200
+  maxUtteranceMs: 11000, // allow longer utterances for this game
+  postSilenceMs: 2500,
+  minPostSilenceMs: 1600
 };
 
 let animalSequence = [];
@@ -188,6 +189,46 @@ function normalizeText(text) {
     .trim();
 }
 
+function levenshteinDistance(a, b) {
+  if (a === b) return 0;
+  if (!a) return b.length;
+  if (!b) return a.length;
+
+  const rows = b.length + 1;
+  const cols = a.length + 1;
+  const dist = new Array(rows);
+
+  for (let i = 0; i < rows; i++) {
+    dist[i] = new Array(cols);
+    dist[i][0] = i;
+  }
+  for (let j = 0; j < cols; j++) {
+    dist[0][j] = j;
+  }
+
+  for (let i = 1; i < rows; i++) {
+    for (let j = 1; j < cols; j++) {
+      const cost = b.charAt(i - 1) === a.charAt(j - 1) ? 0 : 1;
+      dist[i][j] = Math.min(
+        dist[i - 1][j] + 1,
+        dist[i][j - 1] + 1,
+        dist[i - 1][j - 1] + cost
+      );
+    }
+  }
+
+  return dist[rows - 1][cols - 1];
+}
+
+function isFuzzySimilar(candidate, keyword) {
+  if (!candidate || !keyword) return false;
+
+  const distance = levenshteinDistance(candidate, keyword);
+  const tolerance = keyword.length <= 4 ? 1 : 2;
+
+  return distance > 0 && distance <= tolerance;
+}
+
 function isAnimalMatch(results, animal) {
   const keywords = (animal.keywords || [animal.name]).map((w) => normalizeText(w));
   const candidates = (results || []).map((r) => normalizeText(r)).filter(Boolean);
@@ -200,6 +241,8 @@ function isAnimalMatch(results, animal) {
       if (candidate.includes(keyword)) return true;
       const words = candidate.split(" ");
       if (words.includes(keyword)) return true;
+      if (isFuzzySimilar(candidate, keyword)) return true;
+      if (words.some((w) => isFuzzySimilar(w, keyword))) return true;
     }
   }
   return false;
@@ -273,7 +316,7 @@ function startNewGame() {
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
-  statusEl.textContent = "Get ready to say what you see!";
+  statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   updateUIForCurrentAnimal();
 
@@ -292,7 +335,7 @@ function startNewGame() {
       function () {
         console.log("LimeTunaSpeech.init success (animals)");
         sttEnabled = true;
-        statusEl.textContent = "Speech ready. Say what you see when you're ready.";
+        statusEl.textContent = ANIMALS_STATUS_PROMPT;
         startListeningForCurrentAnimal();
       },
       function (err) {
@@ -359,8 +402,7 @@ function startListeningForCurrentAnimal() {
   }
 
   recognizing = true;
-  const attemptNumber = attemptCount + 1;
-  statusEl.textContent = `Listening (${attemptNumber}/${MAX_ATTEMPTS_PER_ANIMAL})…`;
+  statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   try {
     LimeTunaSpeech.startLetter(
@@ -374,7 +416,7 @@ function startListeningForCurrentAnimal() {
 
         const isCorrect = isAnimalMatch(heard, animal);
         console.log("[animals] result", { animal: animal.name, rawText, allResults, isCorrect });
-        statusEl.textContent = isCorrect ? "Nice job!" : "Let's try again.";
+        statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
         if (isCorrect) {
           handleCorrect();
@@ -416,7 +458,7 @@ function startListeningForCurrentAnimal() {
 function handleCorrect() {
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
-  statusEl.textContent = "Great job!";
+  statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
 
@@ -434,7 +476,7 @@ function handleIncorrect() {
   if (isRetry) {
     feedbackEl.textContent = "✕ Try again!";
     feedbackEl.style.color = "#c62828";
-    statusEl.textContent = "Give it another shot.";
+    statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
     playSound(soundWrongEl, () => {
       startListeningForCurrentAnimal();
@@ -442,7 +484,7 @@ function handleIncorrect() {
   } else {
     feedbackEl.textContent = "✕ Wrong answer.";
     feedbackEl.style.color = "#c62828";
-    statusEl.textContent = "Moving to the next one.";
+    statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
     playSound(soundWrongEl, () => {
       advanceToNextAnimal();
@@ -479,11 +521,11 @@ function advanceToNextAnimal(options) {
 
 function endGame() {
   const total = animalSequence.length;
-  statusEl.textContent = "Game over.\n" + `You got ${correctCount} out of ${total} animals right.`;
+  statusEl.textContent = "";
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
 
-  const msg = `You got ${correctCount} out of ${total} animals right.`;
+  const msg = `Score: ${correctCount} / ${total}`;
   finalScoreEl.textContent = msg;
   finalScoreEl.classList.remove("hidden");
 
