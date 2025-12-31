@@ -85,44 +85,29 @@ function buildAnimalSequence() {
     });
   });
 
-  let shuffledPool = shuffleArray(imagePool);
   const animalCounts = new Map();
   const result = [];
+  let lastAnimalName = null;
+  const usedImages = new Set();
 
-  for (const entry of shuffledPool) {
-    const currentCount = animalCounts.get(entry.animal.name) || 0;
-    if (currentCount >= MAX_ANIMAL_OCCURRENCES) continue;
+  while (result.length < TOTAL_ROUNDS) {
+    const availablePool = imagePool.filter(
+      (entry) => !usedImages.has(entry.image) && (animalCounts.get(entry.animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
+    );
+
+    if (!availablePool.length) break;
+
+    const preferred = availablePool.filter((entry) => entry.animal.name !== lastAnimalName);
+    const shuffledPool = shuffleArray(preferred.length ? preferred : availablePool);
+    const entry = shuffledPool[0];
 
     result.push({
       ...entry.animal,
       image: entry.image
     });
-    animalCounts.set(entry.animal.name, currentCount + 1);
-
-    if (result.length >= TOTAL_ROUNDS) break;
-  }
-
-  if (result.length < TOTAL_ROUNDS) {
-    const remainingPool = imagePool.filter(
-      (entry) =>
-        !result.some((chosen) => chosen.image === entry.image) &&
-        (animalCounts.get(entry.animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
-    );
-
-    shuffledPool = shuffleArray(remainingPool);
-
-    for (const entry of shuffledPool) {
-      const currentCount = animalCounts.get(entry.animal.name) || 0;
-      if (currentCount >= MAX_ANIMAL_OCCURRENCES) continue;
-
-      result.push({
-        ...entry.animal,
-        image: entry.image
-      });
-      animalCounts.set(entry.animal.name, currentCount + 1);
-
-      if (result.length >= TOTAL_ROUNDS) break;
-    }
+    animalCounts.set(entry.animal.name, (animalCounts.get(entry.animal.name) || 0) + 1);
+    lastAnimalName = entry.animal.name;
+    usedImages.add(entry.image);
   }
 
   return result;
