@@ -37,6 +37,12 @@ const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
+const ANIMALS_SPEECH_OPTIONS = {
+  language: "en-US",
+  maxUtteranceMs: 7000, // allow longer utterances for this game
+  postSilenceMs: 2000,
+  minPostSilenceMs: 1200
+};
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -297,9 +303,7 @@ function startNewGame() {
 
   if (window.LimeTunaSpeech && window.cordova) {
     LimeTunaSpeech.init(
-      {
-        language: "en-US"
-      },
+      ANIMALS_SPEECH_OPTIONS,
       function () {
         console.log("LimeTunaSpeech.init success (animals)");
         sttEnabled = true;
