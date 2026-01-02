@@ -39,10 +39,13 @@ const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 11000, // allow longer utterances for this game
+  maxUtteranceMs: 20000, // allow longer utterances for this game (20 seconds per attempt)
   postSilenceMs: 2500,
   minPostSilenceMs: 1600
 };
+
+const NO_SOUND_HINT_DELAY_MS = 10000; // Play hint after 10s of silence
+const NO_SOUND_RMS_THRESHOLD_DB = -35; // Treat RMS values above this as "sound detected"
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -69,13 +72,15 @@ let soundCorrectEl;
 let soundWrongEl;
 let soundWinEl;
 let soundLoseEl;
-let soundCorrectVariantEls = [];
 let soundWrongVariantEls = [];
 let soundOneMoreTimeEls = [];
 let soundPreQuestionRootEls = [];
 let soundPreQuestionAnimalEls = [];
 let animalVoiceEls = {};
 let animalEffectEls = {};
+let noSoundHintTimerId = null;
+let attemptSoundDetected = false;
+let currentAttemptToken = 0;
 
 const audioCache = new Map();
 
@@ -191,6 +196,35 @@ function playAudioSequence(sequence, onComplete) {
   };
 
   playNext(0);
+}
+
+function clearNoSoundHintTimer(token) {
+  if (token && token !== currentAttemptToken) return;
+  if (noSoundHintTimerId) {
+    clearTimeout(noSoundHintTimerId);
+    noSoundHintTimerId = null;
+  }
+}
+
+function scheduleNoSoundHint(animal, token) {
+  clearNoSoundHintTimer(token);
+  if (!animal) return;
+
+  noSoundHintTimerId = setTimeout(() => {
+    if (token !== currentAttemptToken || attemptSoundDetected) return;
+    const effect = animalEffectEls[animal.name];
+    playSound(effect, () => {
+      if (token !== currentAttemptToken) return;
+      noSoundHintTimerId = null;
+    });
+  }, NO_SOUND_HINT_DELAY_MS);
+}
+
+function markSoundDetected(token) {
+  if (token !== currentAttemptToken) return;
+  if (attemptSoundDetected) return;
+  attemptSoundDetected = true;
+  clearNoSoundHintTimer(token);
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -358,9 +392,6 @@ function initAnimalsGame() {
   soundWrongEl = document.getElementById("soundWrong");
   soundWinEl = document.getElementById("soundWin");
   soundLoseEl = document.getElementById("soundLose");
-  soundCorrectVariantEls = ["audio/correct_v1.mp3", "audio/correct_v2.mp3", "audio/correct_v3.mp3"].map(
-    getAudioElement
-  );
   soundWrongVariantEls = ["audio/wrong_v1.mp3", "audio/wrong_v2.mp3", "audio/wrong_v3.mp3"].map(
     getAudioElement
   );
@@ -421,6 +452,9 @@ function initAnimalsGame() {
 }
 
 function startNewGame() {
+  clearNoSoundHintTimer();
+  attemptSoundDetected = false;
+  currentAttemptToken = 0;
   animalSequence = buildAnimalSequence();
   currentIndex = 0;
   correctCount = 0;
@@ -532,12 +566,16 @@ function startListeningForCurrentAnimal(options = {}) {
 
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
+    attemptSoundDetected = false;
+    const attemptToken = ++currentAttemptToken;
+    scheduleNoSoundHint(animal, attemptToken);
 
     try {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
           recognizing = false;
+          clearNoSoundHintTimer(attemptToken);
           const rawText = result && result.text ? result.text : "";
           const allResults =
             result && Array.isArray(result.allResults) ? result.allResults.slice() : [];
@@ -555,6 +593,7 @@ function startListeningForCurrentAnimal(options = {}) {
         },
         function (err) {
           recognizing = false;
+          clearNoSoundHintTimer(attemptToken);
           const code = parseErrorCode(err);
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
@@ -574,6 +613,13 @@ function startListeningForCurrentAnimal(options = {}) {
 
           statusEl.textContent = "Error starting speech. Retrying…";
           retryOrAdvance();
+        },
+        function (rmsPayload) {
+          if (!rmsPayload) return;
+          const rmsValue = typeof rmsPayload.rms_db === "number" ? rmsPayload.rms_db : null;
+          if (rmsValue !== null && rmsValue > NO_SOUND_RMS_THRESHOLD_DB) {
+            markSoundDetected(attemptToken);
+          }
         }
       );
     } catch (err) {
@@ -596,21 +642,22 @@ function startListeningForCurrentAnimal(options = {}) {
 }
 
 function handleCorrect(animal) {
+  clearNoSoundHintTimer();
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
 
-  const variant = chooseRandomSound(soundCorrectVariantEls);
   const voice = animalVoiceEls[animal.name];
   const effect = animalEffectEls[animal.name];
-  playAudioSequence([soundCorrectEl, variant, voice, effect], () => {
+  playAudioSequence([soundCorrectEl, voice, effect], () => {
     advanceToNextAnimal();
   });
 }
 
 function handleIncorrect(options = {}) {
+  clearNoSoundHintTimer();
   const reason = options.reason || "wrong";
   attemptCount++;
 
@@ -642,13 +689,12 @@ function handleIncorrect(options = {}) {
     feedbackEl.style.color = "#c62828";
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
-    if (reason === "no_match") {
+    const animal = animalSequence[currentIndex];
+    const voice = animal ? animalVoiceEls[animal.name] : null;
+    const effect = animal ? animalEffectEls[animal.name] : null;
+    playAudioSequence([soundWrongEl, voice, effect], () => {
       advanceToNextAnimal();
-    } else {
-      playSound(soundWrongEl, () => {
-        advanceToNextAnimal();
-      });
-    }
+    });
   }
 }
 
