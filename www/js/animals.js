@@ -36,13 +36,20 @@ const ANIMALS = [
 const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
+const ATTEMPT_DURATION_MS = 20000;
+const HINT_AFTER_MS = 10000;
+const POST_HINT_DURATION_MS = 10000;
+const NO_MATCH_RESTART_DELAY_MS = 250;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 11000, // allow longer utterances for this game
-  postSilenceMs: 2500,
-  minPostSilenceMs: 1600
+  maxUtteranceMs: ATTEMPT_DURATION_MS, // allow longer utterances for this game (20 seconds per attempt)
+  postSilenceMs: 12000, // keep listening longer before auto-commit
+  minPostSilenceMs: 5000
 };
+
+const NO_SOUND_HINT_DELAY_MS = HINT_AFTER_MS; // Play hint after 10s of silence
+const NO_SOUND_RMS_THRESHOLD_DB = -35; // Treat RMS values above this as "sound detected"
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -69,13 +76,18 @@ let soundCorrectEl;
 let soundWrongEl;
 let soundWinEl;
 let soundLoseEl;
-let soundCorrectVariantEls = [];
 let soundWrongVariantEls = [];
 let soundOneMoreTimeEls = [];
 let soundPreQuestionRootEls = [];
 let soundPreQuestionAnimalEls = [];
 let animalVoiceEls = {};
 let animalEffectEls = {};
+let noSoundHintTimerId = null;
+let attemptSoundDetected = false;
+let currentAttemptToken = 0;
+let attemptDeadlineTimerId = null;
+let attemptHintPlayed = false;
+let attemptDeadlineAtMs = null;
 
 const audioCache = new Map();
 
@@ -191,6 +203,91 @@ function playAudioSequence(sequence, onComplete) {
   };
 
   playNext(0);
+}
+
+function clearNoSoundHintTimer(token) {
+  if (token && token !== currentAttemptToken) return;
+  if (noSoundHintTimerId) {
+    clearTimeout(noSoundHintTimerId);
+    noSoundHintTimerId = null;
+  }
+}
+
+function clearAttemptDeadlineTimer(token) {
+  if (token && token !== currentAttemptToken) return;
+  if (attemptDeadlineTimerId) {
+    clearTimeout(attemptDeadlineTimerId);
+    attemptDeadlineTimerId = null;
+  }
+  attemptDeadlineAtMs = null;
+}
+
+function clearAttemptTimers(token) {
+  clearNoSoundHintTimer(token);
+  clearAttemptDeadlineTimer(token);
+}
+
+function scheduleAttemptDeadline(durationMs, token) {
+  clearAttemptDeadlineTimer(token);
+  attemptDeadlineAtMs = Date.now() + durationMs;
+  attemptDeadlineTimerId = setTimeout(() => {
+    if (token !== currentAttemptToken) return;
+    recognizing = false;
+    clearAttemptTimers(token);
+    handleIncorrect({ reason: "no_match" });
+  }, durationMs);
+}
+
+function scheduleNoSoundHint(animal, token) {
+  clearNoSoundHintTimer(token);
+  if (!animal) return;
+  if (attemptHintPlayed) return;
+
+  noSoundHintTimerId = setTimeout(() => {
+    if (token !== currentAttemptToken || attemptSoundDetected || attemptHintPlayed) return;
+    attemptHintPlayed = true;
+    clearNoSoundHintTimer(token);
+    clearAttemptDeadlineTimer(token);
+    const restartAfterHint = () => {
+      startListeningForCurrentAnimal({
+        skipPreQuestion: true,
+        hintRestart: true,
+        reuseToken: true
+      });
+    };
+
+    const effect = animalEffectEls[animal.name];
+    const stopAndPlay = () => {
+      if (window.cordova && window.LimeTunaSpeech && typeof LimeTunaSpeech.stop === "function") {
+        try {
+          LimeTunaSpeech.stop(() => {
+            recognizing = false;
+            playSound(effect, () => {
+              noSoundHintTimerId = null;
+              restartAfterHint();
+            });
+          });
+          return;
+        } catch (e) {
+          console.warn("Failed to stop before hint playback; continuing", e);
+        }
+      }
+      recognizing = false;
+      playSound(effect, () => {
+        noSoundHintTimerId = null;
+        restartAfterHint();
+      });
+    };
+
+    stopAndPlay();
+  }, NO_SOUND_HINT_DELAY_MS);
+}
+
+function markSoundDetected(token) {
+  if (token !== currentAttemptToken) return;
+  if (attemptSoundDetected) return;
+  attemptSoundDetected = true;
+  clearNoSoundHintTimer(token);
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -358,9 +455,6 @@ function initAnimalsGame() {
   soundWrongEl = document.getElementById("soundWrong");
   soundWinEl = document.getElementById("soundWin");
   soundLoseEl = document.getElementById("soundLose");
-  soundCorrectVariantEls = ["audio/correct_v1.mp3", "audio/correct_v2.mp3", "audio/correct_v3.mp3"].map(
-    getAudioElement
-  );
   soundWrongVariantEls = ["audio/wrong_v1.mp3", "audio/wrong_v2.mp3", "audio/wrong_v3.mp3"].map(
     getAudioElement
   );
@@ -421,6 +515,11 @@ function initAnimalsGame() {
 }
 
 function startNewGame() {
+  clearAttemptTimers();
+  attemptSoundDetected = false;
+  currentAttemptToken = 0;
+  attemptHintPlayed = false;
+  attemptDeadlineAtMs = null;
   animalSequence = buildAnimalSequence();
   currentIndex = 0;
   correctCount = 0;
@@ -485,6 +584,8 @@ function startNewGame() {
 
 function updateUIForCurrentAnimal() {
   attemptCount = 0;
+  attemptHintPlayed = false;
+  attemptDeadlineAtMs = null;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -507,6 +608,9 @@ function updateUIForCurrentAnimal() {
 function startListeningForCurrentAnimal(options = {}) {
   const skipPreQuestion = !!options.skipPreQuestion;
   const isFirstAttempt = attemptCount === 0;
+  const reuseToken = !!options.reuseToken;
+  const keepTimers = !!options.keepTimers;
+  const resetAttemptState = options.resetAttemptState !== false;
 
   if (!sttEnabled || sttFatalError || !window.LimeTunaSpeech || !window.cordova) {
     statusEl.textContent = "Speech engine not available.";
@@ -532,12 +636,24 @@ function startListeningForCurrentAnimal(options = {}) {
 
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
+    const attemptToken = reuseToken ? currentAttemptToken : ++currentAttemptToken;
+    if (resetAttemptState) {
+      attemptSoundDetected = false;
+      attemptHintPlayed = !!options.hintRestart;
+    }
+    if (!keepTimers) {
+      clearAttemptTimers(attemptToken);
+      const remainingMs = attemptHintPlayed ? POST_HINT_DURATION_MS : ATTEMPT_DURATION_MS;
+      scheduleAttemptDeadline(remainingMs, attemptToken);
+      scheduleNoSoundHint(animal, attemptToken);
+    }
 
     try {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
           recognizing = false;
+          clearAttemptTimers(attemptToken);
           const rawText = result && result.text ? result.text : "";
           const allResults =
             result && Array.isArray(result.allResults) ? result.allResults.slice() : [];
@@ -559,11 +675,25 @@ function startListeningForCurrentAnimal(options = {}) {
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
           if (code === "NO_MATCH") {
+            const now = Date.now();
+            if (attemptDeadlineAtMs && now < attemptDeadlineAtMs - 100) {
+              setTimeout(() => {
+                startListeningForCurrentAnimal({
+                  skipPreQuestion: true,
+                  reuseToken: true,
+                  keepTimers: true,
+                  resetAttemptState: false
+                });
+              }, NO_MATCH_RESTART_DELAY_MS);
+              return;
+            }
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
+            clearAttemptTimers(attemptToken);
             handleIncorrect({ reason: "no_match" });
             return;
           }
 
+          clearAttemptTimers(attemptToken);
           if (isHardSttErrorCode(code)) {
             sttFatalError = true;
             sttEnabled = false;
@@ -574,6 +704,13 @@ function startListeningForCurrentAnimal(options = {}) {
 
           statusEl.textContent = "Error starting speech. Retrying…";
           retryOrAdvance();
+        },
+        function (rmsPayload) {
+          if (!rmsPayload) return;
+          const rmsValue = typeof rmsPayload.rms_db === "number" ? rmsPayload.rms_db : null;
+          if (rmsValue !== null && rmsValue > NO_SOUND_RMS_THRESHOLD_DB) {
+            markSoundDetected(attemptToken);
+          }
         }
       );
     } catch (err) {
@@ -596,21 +733,22 @@ function startListeningForCurrentAnimal(options = {}) {
 }
 
 function handleCorrect(animal) {
+  clearAttemptTimers();
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
 
-  const variant = chooseRandomSound(soundCorrectVariantEls);
   const voice = animalVoiceEls[animal.name];
   const effect = animalEffectEls[animal.name];
-  playAudioSequence([soundCorrectEl, variant, voice, effect], () => {
+  playAudioSequence([soundCorrectEl, voice, effect], () => {
     advanceToNextAnimal();
   });
 }
 
 function handleIncorrect(options = {}) {
+  clearAttemptTimers();
   const reason = options.reason || "wrong";
   attemptCount++;
 
@@ -642,13 +780,12 @@ function handleIncorrect(options = {}) {
     feedbackEl.style.color = "#c62828";
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
-    if (reason === "no_match") {
+    const animal = animalSequence[currentIndex];
+    const voice = animal ? animalVoiceEls[animal.name] : null;
+    const effect = animal ? animalEffectEls[animal.name] : null;
+    playAudioSequence([soundWrongEl, voice, effect], () => {
       advanceToNextAnimal();
-    } else {
-      playSound(soundWrongEl, () => {
-        advanceToNextAnimal();
-      });
-    }
+    });
   }
 }
 
