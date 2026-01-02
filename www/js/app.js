@@ -9,6 +9,8 @@ const LIMETUNA_GAMES = [
   // Comment some out if you want fewer tiles.
 ];
 
+let animalsTileSound = null;
+
 function initLimetunaPortal() {
   const gridEl = document.getElementById("tilesGrid");
   const modalOverlay = document.getElementById("modalOverlay");
@@ -20,6 +22,11 @@ function initLimetunaPortal() {
     console.error("tilesGrid element not found");
     return;
   }
+
+  animalsTileSound = new Audio("audio/animals/letsplay.mp3");
+  animalsTileSound.preload = "auto";
+  animalsTileSound.muted = false;
+  animalsTileSound.volume = 1.0;
 
   LIMETUNA_GAMES.forEach((game, index) => {
     const tileBtn = document.createElement("button");
@@ -37,7 +44,30 @@ function initLimetunaPortal() {
       if (game.id === "letters") {
         window.location.href = "letters.html";
       } else if (game.id === "animals") {
-        window.location.href = "animals.html";
+        const goToAnimals = () => {
+          window.location.href = "animals.html";
+        };
+
+        if (animalsTileSound) {
+          animalsTileSound.currentTime = 0;
+          const onEnd = () => {
+            animalsTileSound.removeEventListener("ended", onEnd);
+            goToAnimals();
+          };
+          animalsTileSound.addEventListener("ended", onEnd);
+
+          const p = animalsTileSound.play();
+          if (p && typeof p.then === "function") {
+            p.catch(() => {
+              animalsTileSound.removeEventListener("ended", onEnd);
+              goToAnimals();
+            });
+          } else {
+            goToAnimals();
+          }
+        } else {
+          goToAnimals();
+        }
       } else {
         // For now, keep other tiles as simple modals
         openGameModal(game, index);

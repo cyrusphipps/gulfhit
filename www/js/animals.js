@@ -36,7 +36,6 @@ const ANIMALS = [
 const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
-const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
@@ -50,6 +49,10 @@ let currentIndex = 0;
 let correctCount = 0;
 let attemptCount = 0;
 let recognizing = false;
+let lastWrongVariantSound = null;
+let lastOneMoreTimeSound = null;
+let lastPreQuestionFolder = null;
+let preQuestionFolderStreak = 0;
 
 let sttEnabled = false;
 let sttFatalError = false;
@@ -66,6 +69,15 @@ let soundCorrectEl;
 let soundWrongEl;
 let soundWinEl;
 let soundLoseEl;
+let soundCorrectVariantEls = [];
+let soundWrongVariantEls = [];
+let soundOneMoreTimeEls = [];
+let soundPreQuestionRootEls = [];
+let soundPreQuestionAnimalEls = [];
+let animalVoiceEls = {};
+let animalEffectEls = {};
+
+const audioCache = new Map();
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -114,7 +126,22 @@ function buildAnimalSequence() {
   return result;
 }
 
-function playSound(el, onEnded) {
+function getAudioElement(source) {
+  if (!source) return null;
+  if (typeof HTMLAudioElement !== "undefined" && source instanceof HTMLAudioElement) return source;
+
+  if (audioCache.has(source)) return audioCache.get(source);
+
+  const audio = new Audio(source);
+  audio.preload = "auto";
+  audio.muted = false;
+  audio.volume = 1.0;
+  audioCache.set(source, audio);
+  return audio;
+}
+
+function playSound(elOrSrc, onEnded) {
+  const el = getAudioElement(elOrSrc);
   if (!el) {
     if (typeof onEnded === "function") onEnded();
     return;
@@ -144,6 +171,69 @@ function playSound(el, onEnded) {
     console.warn("sound play exception:", e);
     if (typeof onEnded === "function") onEnded();
   }
+}
+
+function playSoundPromise(elOrSrc) {
+  return new Promise((resolve) => {
+    playSound(elOrSrc, resolve);
+  });
+}
+
+function playAudioSequence(sequence, onComplete) {
+  const list = (sequence || []).filter(Boolean);
+
+  const playNext = (index) => {
+    if (index >= list.length) {
+      if (typeof onComplete === "function") onComplete();
+      return;
+    }
+    playSound(list[index], () => playNext(index + 1));
+  };
+
+  playNext(0);
+}
+
+function chooseRandomSound(pool, lastSound) {
+  if (!Array.isArray(pool) || !pool.length) return null;
+  const filtered = pool.filter((item) => item && item !== lastSound);
+  const selectionPool = filtered.length ? filtered : pool.filter(Boolean);
+  if (!selectionPool.length) return null;
+  const idx = Math.floor(Math.random() * selectionPool.length);
+  return selectionPool[idx];
+}
+
+function pickPreQuestionSound({ isGameStart } = {}) {
+  const hasRoot = soundPreQuestionRootEls.length > 0;
+  const hasAnimals = soundPreQuestionAnimalEls.length > 0;
+  if (!hasRoot && !hasAnimals) return null;
+
+  let allowedFolders = [];
+  if (isGameStart && hasAnimals) {
+    allowedFolders = ["animals"];
+  } else {
+    if (hasRoot) allowedFolders.push("root");
+    if (hasAnimals) allowedFolders.push("animals");
+    if (preQuestionFolderStreak >= 2 && lastPreQuestionFolder) {
+      allowedFolders = allowedFolders.filter((f) => f !== lastPreQuestionFolder);
+    }
+    if (!allowedFolders.length) {
+      if (hasRoot) allowedFolders.push("root");
+      if (hasAnimals) allowedFolders.push("animals");
+    }
+  }
+
+  const folder = allowedFolders[Math.floor(Math.random() * allowedFolders.length)];
+  const pool = folder === "animals" ? soundPreQuestionAnimalEls : soundPreQuestionRootEls;
+  const sound = chooseRandomSound(pool);
+
+  if (folder === lastPreQuestionFolder) {
+    preQuestionFolderStreak += 1;
+  } else {
+    lastPreQuestionFolder = folder;
+    preQuestionFolderStreak = 1;
+  }
+
+  return sound;
 }
 
 function parseErrorCode(err) {
@@ -268,6 +358,32 @@ function initAnimalsGame() {
   soundWrongEl = document.getElementById("soundWrong");
   soundWinEl = document.getElementById("soundWin");
   soundLoseEl = document.getElementById("soundLose");
+  soundCorrectVariantEls = ["audio/correct_v1.mp3", "audio/correct_v2.mp3", "audio/correct_v3.mp3"].map(
+    getAudioElement
+  );
+  soundWrongVariantEls = ["audio/wrong_v1.mp3", "audio/wrong_v2.mp3", "audio/wrong_v3.mp3"].map(
+    getAudioElement
+  );
+  soundOneMoreTimeEls = [
+    "audio/one_more_time1.mp3",
+    "audio/one_more_time2.mp3",
+    "audio/one_more_time3.mp3"
+  ].map(getAudioElement);
+  soundPreQuestionRootEls = ["audio/pre_question1.mp3", "audio/pre_question2.mp3", "audio/pre_question3.mp3"].map(
+    getAudioElement
+  );
+  soundPreQuestionAnimalEls = [
+    "audio/animals/pre_question1.mp3",
+    "audio/animals/pre_question2.mp3",
+    "audio/animals/pre_question3.mp3"
+  ].map(getAudioElement);
+
+  ANIMALS.forEach((animal) => {
+    const key = animal.name;
+    const base = (animal.name || "").toLowerCase();
+    animalVoiceEls[key] = getAudioElement(`audio/animals/${base}_v.mp3`);
+    animalEffectEls[key] = getAudioElement(`audio/animals/${base}_e.wav`);
+  });
 
   [soundCorrectEl, soundWrongEl, soundWinEl, soundLoseEl].forEach((el) => {
     if (el) {
@@ -311,6 +427,10 @@ function startNewGame() {
   attemptCount = 0;
   recognizing = false;
   sttFatalError = false;
+  lastWrongVariantSound = null;
+  lastOneMoreTimeSound = null;
+  lastPreQuestionFolder = null;
+  preQuestionFolderStreak = 0;
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -384,7 +504,10 @@ function updateUIForCurrentAnimal() {
   feedbackEl.style.color = "";
 }
 
-function startListeningForCurrentAnimal() {
+function startListeningForCurrentAnimal(options = {}) {
+  const skipPreQuestion = !!options.skipPreQuestion;
+  const isFirstAttempt = attemptCount === 0;
+
   if (!sttEnabled || sttFatalError || !window.LimeTunaSpeech || !window.cordova) {
     statusEl.textContent = "Speech engine not available.";
     return;
@@ -401,94 +524,131 @@ function startListeningForCurrentAnimal() {
     return;
   }
 
-  recognizing = true;
-  statusEl.textContent = ANIMALS_STATUS_PROMPT;
+  const beginListening = () => {
+    if (recognizing) {
+      console.log("Already recognizing; ignoring extra start.");
+      return;
+    }
 
-  try {
-    LimeTunaSpeech.startLetter(
-      animal.name,
-      function (result) {
-        recognizing = false;
-        const rawText = result && result.text ? result.text : "";
-        const allResults =
-          result && Array.isArray(result.allResults) ? result.allResults.slice() : [];
-        const heard = [rawText, ...allResults];
+    recognizing = true;
+    statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
-        const isCorrect = isAnimalMatch(heard, animal);
-        console.log("[animals] result", { animal: animal.name, rawText, allResults, isCorrect });
-        statusEl.textContent = ANIMALS_STATUS_PROMPT;
+    try {
+      LimeTunaSpeech.startLetter(
+        animal.name,
+        function (result) {
+          recognizing = false;
+          const rawText = result && result.text ? result.text : "";
+          const allResults =
+            result && Array.isArray(result.allResults) ? result.allResults.slice() : [];
+          const heard = [rawText, ...allResults];
 
-        if (isCorrect) {
-          handleCorrect();
-        } else {
-          handleIncorrect();
+          const isCorrect = isAnimalMatch(heard, animal);
+          console.log("[animals] result", { animal: animal.name, rawText, allResults, isCorrect });
+          statusEl.textContent = ANIMALS_STATUS_PROMPT;
+
+          if (isCorrect) {
+            handleCorrect(animal);
+          } else {
+            handleIncorrect({ reason: "wrong" });
+          }
+        },
+        function (err) {
+          recognizing = false;
+          const code = parseErrorCode(err);
+          console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
+
+          if (code === "NO_MATCH") {
+            statusEl.textContent = "We couldn't hear that clearly. Try again.";
+            handleIncorrect({ reason: "no_match" });
+            return;
+          }
+
+          if (isHardSttErrorCode(code)) {
+            sttFatalError = true;
+            sttEnabled = false;
+            statusEl.textContent = "Speech engine error. Showing animals without listening.";
+            advanceToNextAnimal({ skipListening: true });
+            return;
+          }
+
+          statusEl.textContent = "Error starting speech. Retrying…";
+          retryOrAdvance();
         }
-      },
-      function (err) {
-        recognizing = false;
-        const code = parseErrorCode(err);
-        console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
+      );
+    } catch (err) {
+      console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
+      recognizing = false;
+      statusEl.textContent = "Speech start failed. Retrying…";
+      retryOrAdvance();
+    }
+  };
 
-        if (code === "NO_MATCH") {
-          statusEl.textContent = "We couldn't hear that clearly. Try again.";
-          handleIncorrect();
-          return;
-        }
-
-        if (isHardSttErrorCode(code)) {
-          sttFatalError = true;
-          sttEnabled = false;
-          statusEl.textContent = "Speech engine error. Showing animals without listening.";
-          advanceToNextAnimal({ skipListening: true });
-          return;
-        }
-
-        statusEl.textContent = "Error starting speech. Retrying…";
-        retryOrAdvance();
-      }
-    );
-  } catch (err) {
-    console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
-    recognizing = false;
-    statusEl.textContent = "Speech start failed. Retrying…";
-    retryOrAdvance();
+  if (!skipPreQuestion && isFirstAttempt) {
+    const preSound = pickPreQuestionSound({ isGameStart: currentIndex === 0 });
+    if (preSound) {
+      playSound(preSound, beginListening);
+      return;
+    }
   }
+
+  beginListening();
 }
 
-function handleCorrect() {
+function handleCorrect(animal) {
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
 
-  playSound(soundCorrectEl);
-  setTimeout(() => {
+  const variant = chooseRandomSound(soundCorrectVariantEls);
+  const voice = animalVoiceEls[animal.name];
+  const effect = animalEffectEls[animal.name];
+  playAudioSequence([soundCorrectEl, variant, voice, effect], () => {
     advanceToNextAnimal();
-  }, CORRECT_SOUND_DURATION_MS);
+  });
 }
 
-function handleIncorrect() {
+function handleIncorrect(options = {}) {
+  const reason = options.reason || "wrong";
   attemptCount++;
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
+  const isFirstAttempt = attemptCount === 1;
 
   if (isRetry) {
     feedbackEl.textContent = "✕ Try again!";
     feedbackEl.style.color = "#c62828";
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
-    playSound(soundWrongEl, () => {
-      startListeningForCurrentAnimal();
-    });
+    if (reason === "no_match") {
+      const retrySound = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
+      if (retrySound) lastOneMoreTimeSound = retrySound;
+      playSound(retrySound, () => {
+        startListeningForCurrentAnimal({ skipPreQuestion: true });
+      });
+    } else {
+      const wrongVariant = isFirstAttempt
+        ? chooseRandomSound(soundWrongVariantEls, lastWrongVariantSound)
+        : null;
+      if (wrongVariant) lastWrongVariantSound = wrongVariant;
+      playAudioSequence([soundWrongEl, wrongVariant], () => {
+        startListeningForCurrentAnimal({ skipPreQuestion: true });
+      });
+    }
   } else {
     feedbackEl.textContent = "✕ Wrong answer.";
     feedbackEl.style.color = "#c62828";
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
-    playSound(soundWrongEl, () => {
+    if (reason === "no_match") {
       advanceToNextAnimal();
-    });
+    } else {
+      playSound(soundWrongEl, () => {
+        advanceToNextAnimal();
+      });
+    }
   }
 }
 
@@ -496,7 +656,7 @@ function retryOrAdvance() {
   attemptCount++;
 
   if (attemptCount < MAX_ATTEMPTS_PER_ANIMAL) {
-    startListeningForCurrentAnimal();
+    startListeningForCurrentAnimal({ skipPreQuestion: true });
   } else {
     advanceToNextAnimal();
   }
