@@ -39,7 +39,6 @@ const MAX_ANIMAL_OCCURRENCES = 2;
 const ATTEMPT_DURATION_MS = 20000;
 const HINT_AFTER_MS = 10000;
 const POST_HINT_DURATION_MS = 10000;
-const NO_MATCH_RESTART_DELAY_MS = 250;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
@@ -83,10 +82,10 @@ let soundPreQuestionAnimalEls = [];
 let animalVoiceEls = {};
 let animalEffectEls = {};
 let noSoundHintTimerId = null;
+let attemptSoundDetected = false;
 let currentAttemptToken = 0;
 let attemptDeadlineTimerId = null;
 let attemptHintPlayed = false;
-let attemptDeadlineAtMs = null;
 
 const audioCache = new Map();
 
@@ -218,7 +217,6 @@ function clearAttemptDeadlineTimer(token) {
     clearTimeout(attemptDeadlineTimerId);
     attemptDeadlineTimerId = null;
   }
-  attemptDeadlineAtMs = null;
 }
 
 function clearAttemptTimers(token) {
@@ -228,7 +226,6 @@ function clearAttemptTimers(token) {
 
 function scheduleAttemptDeadline(durationMs, token) {
   clearAttemptDeadlineTimer(token);
-  attemptDeadlineAtMs = Date.now() + durationMs;
   attemptDeadlineTimerId = setTimeout(() => {
     if (token !== currentAttemptToken) return;
     recognizing = false;
@@ -243,16 +240,12 @@ function scheduleNoSoundHint(animal, token) {
   if (attemptHintPlayed) return;
 
   noSoundHintTimerId = setTimeout(() => {
-    if (token !== currentAttemptToken || attemptHintPlayed) return;
+    if (token !== currentAttemptToken || attemptSoundDetected || attemptHintPlayed) return;
     attemptHintPlayed = true;
     clearNoSoundHintTimer(token);
     clearAttemptDeadlineTimer(token);
     const restartAfterHint = () => {
-      startListeningForCurrentAnimal({
-        skipPreQuestion: true,
-        hintRestart: true,
-        reuseToken: true
-      });
+      startListeningForCurrentAnimal({ skipPreQuestion: true, hintRestart: true });
     };
 
     const effect = animalEffectEls[animal.name];
@@ -284,6 +277,8 @@ function scheduleNoSoundHint(animal, token) {
 
 function markSoundDetected(token) {
   if (token !== currentAttemptToken) return;
+  if (attemptSoundDetected) return;
+  attemptSoundDetected = true;
   clearNoSoundHintTimer(token);
 }
 
@@ -513,9 +508,9 @@ function initAnimalsGame() {
 
 function startNewGame() {
   clearAttemptTimers();
+  attemptSoundDetected = false;
   currentAttemptToken = 0;
   attemptHintPlayed = false;
-  attemptDeadlineAtMs = null;
   animalSequence = buildAnimalSequence();
   currentIndex = 0;
   correctCount = 0;
@@ -581,7 +576,6 @@ function startNewGame() {
 function updateUIForCurrentAnimal() {
   attemptCount = 0;
   attemptHintPlayed = false;
-  attemptDeadlineAtMs = null;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -632,16 +626,13 @@ function startListeningForCurrentAnimal(options = {}) {
 
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
-    const attemptToken = reuseToken ? currentAttemptToken : ++currentAttemptToken;
-    if (resetAttemptState) {
-      attemptHintPlayed = !!options.hintRestart;
-    }
-    if (!keepTimers) {
-      clearAttemptTimers(attemptToken);
-      const remainingMs = attemptHintPlayed ? POST_HINT_DURATION_MS : ATTEMPT_DURATION_MS;
-      scheduleAttemptDeadline(remainingMs, attemptToken);
-      scheduleNoSoundHint(animal, attemptToken);
-    }
+    attemptSoundDetected = false;
+    attemptHintPlayed = !!options.hintRestart;
+    const attemptToken = ++currentAttemptToken;
+    clearAttemptTimers(attemptToken);
+    const remainingMs = attemptHintPlayed ? POST_HINT_DURATION_MS : ATTEMPT_DURATION_MS;
+    scheduleAttemptDeadline(remainingMs, attemptToken);
+    scheduleNoSoundHint(animal, attemptToken);
 
     try {
       LimeTunaSpeech.startLetter(
@@ -666,6 +657,7 @@ function startListeningForCurrentAnimal(options = {}) {
         },
         function (err) {
           recognizing = false;
+          clearAttemptTimers(attemptToken);
           const code = parseErrorCode(err);
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
@@ -737,14 +729,9 @@ function handleCorrect(animal) {
 
   const voice = animalVoiceEls[animal.name];
   const effect = animalEffectEls[animal.name];
-  playSound(soundCorrectEl);
-  setTimeout(() => {
-    playSound(voice, () => {
-      playSound(effect, () => {
-        advanceToNextAnimal();
-      });
-    });
-  }, 1000);
+  playAudioSequence([soundCorrectEl, voice, effect], () => {
+    advanceToNextAnimal();
+  });
 }
 
 function handleIncorrect(options = {}) {
