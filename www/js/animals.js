@@ -598,6 +598,9 @@ function updateUIForCurrentAnimal() {
 function startListeningForCurrentAnimal(options = {}) {
   const skipPreQuestion = !!options.skipPreQuestion;
   const isFirstAttempt = attemptCount === 0;
+  const reuseToken = !!options.reuseToken;
+  const keepTimers = !!options.keepTimers;
+  const resetAttemptState = options.resetAttemptState !== false;
 
   if (!sttEnabled || sttFatalError || !window.LimeTunaSpeech || !window.cordova) {
     statusEl.textContent = "Speech engine not available.";
@@ -659,11 +662,25 @@ function startListeningForCurrentAnimal(options = {}) {
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
           if (code === "NO_MATCH") {
+            const now = Date.now();
+            if (attemptDeadlineAtMs && now < attemptDeadlineAtMs - 100) {
+              setTimeout(() => {
+                startListeningForCurrentAnimal({
+                  skipPreQuestion: true,
+                  reuseToken: true,
+                  keepTimers: true,
+                  resetAttemptState: false
+                });
+              }, NO_MATCH_RESTART_DELAY_MS);
+              return;
+            }
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
+            clearAttemptTimers(attemptToken);
             handleIncorrect({ reason: "no_match" });
             return;
           }
 
+          clearAttemptTimers(attemptToken);
           if (isHardSttErrorCode(code)) {
             sttFatalError = true;
             sttEnabled = false;
