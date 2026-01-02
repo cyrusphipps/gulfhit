@@ -37,9 +37,11 @@ const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
+const CORRECT_VARIANT_DELAY_MS = 1000;
+const CORRECT_EFFECT_DELAY_MS = 1000;
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 11000, // allow longer utterances for this game
+  maxUtteranceMs: 20000, // allow up to 20 seconds per attempt
   postSilenceMs: 2500,
   minPostSilenceMs: 1600
 };
@@ -176,6 +178,15 @@ function playSound(elOrSrc, onEnded) {
 function playSoundPromise(elOrSrc) {
   return new Promise((resolve) => {
     playSound(elOrSrc, resolve);
+  });
+}
+
+function playSoundWithDelay(elOrSrc, delayMs) {
+  const ms = Math.max(0, delayMs || 0);
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      playSound(elOrSrc, resolve);
+    }, ms);
   });
 }
 
@@ -605,9 +616,22 @@ function handleCorrect(animal) {
   const variant = chooseRandomSound(soundCorrectVariantEls);
   const voice = animalVoiceEls[animal.name];
   const effect = animalEffectEls[animal.name];
-  playAudioSequence([soundCorrectEl, variant, voice, effect], () => {
-    advanceToNextAnimal();
-  });
+
+  const plays = [];
+  plays.push(playSoundWithDelay(soundCorrectEl, 0));
+  if (variant) {
+    plays.push(playSoundWithDelay(variant, CORRECT_VARIANT_DELAY_MS));
+  }
+  if (effect) {
+    const effectDelay = CORRECT_VARIANT_DELAY_MS + CORRECT_EFFECT_DELAY_MS;
+    plays.push(playSoundWithDelay(effect, effectDelay));
+  }
+
+  Promise.all(plays.map((p) => p.catch(() => {})))
+    .then(() => playSoundPromise(voice))
+    .then(() => {
+      advanceToNextAnimal();
+    });
 }
 
 function handleIncorrect(options = {}) {
