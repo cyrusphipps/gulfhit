@@ -51,6 +51,8 @@ let currentIndex = 0;
 let correctCount = 0;
 let attemptCount = 0;
 let recognizing = false;
+let attemptWindowStartMs = null;
+let attemptRestartCount = 0;
 
 let sttEnabled = false;
 let sttFatalError = false;
@@ -706,10 +708,13 @@ function handleNoSpeechDetected(expectedUpper) {
 
 function startListeningWatchdog(expectedUpper) {
   clearListeningWatchdog();
+  const nowMs = performance.now();
+  const elapsedMs = attemptWindowStartMs !== null ? nowMs - attemptWindowStartMs : 0;
+  const remainingMs = attemptWindowStartMs === null ? LISTENING_WATCHDOG_MS : Math.max(0, LISTENING_WATCHDOG_MS - elapsedMs);
   listeningWatchdogTimerId = setTimeout(() => {
     if (!recognizing) return;
     handleNoSpeechDetected(expectedUpper);
-  }, LISTENING_WATCHDOG_MS);
+  }, remainingMs);
 }
 
 function clearNoRmsHintTimer() {
@@ -830,6 +835,8 @@ function startNewGame() {
 function updateUIForCurrentLetter() {
   attemptCount = 0;
   noMatchSpeechRetryUsed = false;
+  attemptWindowStartMs = null;
+  attemptRestartCount = 0;
   resetTimingIndicator();
 
   const total = LETTER_SEQUENCE.length;
@@ -868,12 +875,21 @@ function startListeningForCurrentLetter() {
   clearNoRmsHintTimer();
 
   recognizing = true;
+  const nowMs = performance.now();
+  if (attemptWindowStartMs === null) {
+    attemptWindowStartMs = nowMs;
+    attemptRestartCount = 0;
+  } else {
+    attemptRestartCount++;
+  }
   const attemptToken = ++currentAttemptToken;
   const attemptNumber = attemptCount + 1;
   const attemptLabel = `${expected.toUpperCase()} attempt ${attemptNumber}/${MAX_ATTEMPTS_PER_LETTER}`;
-  lastListenStartTs = performance.now();
+  lastListenStartTs = nowMs;
   currentAttemptTiming = {
     js_start_ms: lastListenStartTs,
+    js_attempt_anchor_ms: attemptWindowStartMs,
+    js_attempt_restarts: attemptRestartCount,
     attemptToken,
     expectedUpper: expected.toUpperCase()
   };
@@ -1038,6 +1054,7 @@ function startListeningForCurrentLetter() {
         const sawAnyRms = rmsSeenThisAttempt;
         const now = performance.now();
         const engineMs = now - lastListenStartTs;
+        const attemptWindowElapsedMs = attemptWindowStartMs !== null ? now - attemptWindowStartMs : engineMs;
         recordJsTiming("js_got_result_ms");
         enterPostSilenceWindow();
         stopRmsDebugSession();
@@ -1076,6 +1093,23 @@ function startListeningForCurrentLetter() {
           true
         );
         resetTimingIndicator();
+
+        if (code === "SPEECH_TIMEOUT" && attemptWindowElapsedMs < LISTENING_WATCHDOG_MS) {
+          const remainingBudgetMs = LISTENING_WATCHDOG_MS - attemptWindowElapsedMs;
+          statusEl.textContent = [
+            `Speech timeout after ~${engineMs.toFixed(0)} ms for ${attemptLabel}.`,
+            `Keeping this attempt alive; ${(remainingBudgetMs / 1000).toFixed(1)}s remain in the ${LISTENING_WATCHDOG_MS / 1000}s window.`,
+            engineBreakdownText,
+            `Timings: ${summaryText}`
+          ].join("\n");
+          console.warn("[letters] speech timeout before minimum window; restarting attempt", {
+            attemptWindowElapsedMs,
+            remainingBudgetMs,
+            attemptRestartCount
+          });
+          startListeningForCurrentLetter();
+          return;
+        }
 
         if (code === "NO_MATCH") {
           const lines = [`No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms).`];
@@ -1173,6 +1207,8 @@ function startListeningForCurrentLetter() {
 
 function handleCorrect() {
   const isLast = currentIndex === LETTER_SEQUENCE.length - 1;
+  attemptWindowStartMs = null;
+  attemptRestartCount = 0;
 
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
@@ -1192,6 +1228,8 @@ function handleCorrect() {
 
 function handleIncorrect() {
   attemptCount++;
+  attemptWindowStartMs = null;
+  attemptRestartCount = 0;
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_LETTER;
 
@@ -1222,6 +1260,8 @@ function handleIncorrect() {
 
 function retryOrAdvance() {
   attemptCount++;
+  attemptWindowStartMs = null;
+  attemptRestartCount = 0;
 
   if (attemptCount < MAX_ATTEMPTS_PER_LETTER) {
     startListeningForCurrentLetter();
