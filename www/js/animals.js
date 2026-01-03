@@ -42,9 +42,10 @@ const CORRECT_EFFECT_DELAY_MS = 1000;
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
   maxUtteranceMs: 20000, // allow up to 20 seconds per attempt
-  postSilenceMs: 2500,
-  minPostSilenceMs: 1600
+  postSilenceMs: 20000, // keep the mic open the full window even if the room is quiet
+  minPostSilenceMs: 20000
 };
+const ANIMALS_LISTENING_WATCHDOG_MS = 20000;
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -78,8 +79,17 @@ let soundPreQuestionRootEls = [];
 let soundPreQuestionAnimalEls = [];
 let animalVoiceEls = {};
 let animalEffectEls = {};
+let attemptWindowStartMs = null;
+let listeningWatchdogTimerId = null;
 
 const audioCache = new Map();
+
+function getNowMs() {
+  if (typeof performance !== "undefined" && typeof performance.now === "function") {
+    return performance.now();
+  }
+  return Date.now();
+}
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -202,6 +212,25 @@ function playAudioSequence(sequence, onComplete) {
   };
 
   playNext(0);
+}
+
+function clearListeningWatchdog() {
+  if (listeningWatchdogTimerId) {
+    clearTimeout(listeningWatchdogTimerId);
+    listeningWatchdogTimerId = null;
+  }
+}
+
+function startListeningWatchdog(elapsedMs) {
+  clearListeningWatchdog();
+  const alreadyElapsed = typeof elapsedMs === "number" ? Math.max(0, elapsedMs) : 0;
+  const remaining = Math.max(0, ANIMALS_LISTENING_WATCHDOG_MS - alreadyElapsed);
+  listeningWatchdogTimerId = setTimeout(() => {
+    listeningWatchdogTimerId = null;
+    recognizing = false;
+    statusEl.textContent = "Time is up for this animal.";
+    handleIncorrect({ reason: "timeout" });
+  }, remaining);
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -442,6 +471,8 @@ function startNewGame() {
   lastOneMoreTimeSound = null;
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
+  attemptWindowStartMs = null;
+  clearListeningWatchdog();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -517,10 +548,14 @@ function updateUIForCurrentAnimal() {
 
 function startListeningForCurrentAnimal(options = {}) {
   const skipPreQuestion = !!options.skipPreQuestion;
+  const preserveAttemptStart = !!options.preserveAttemptStart;
   const isFirstAttempt = attemptCount === 0;
+
+  clearListeningWatchdog();
 
   if (!sttEnabled || sttFatalError || !window.LimeTunaSpeech || !window.cordova) {
     statusEl.textContent = "Speech engine not available.";
+    attemptWindowStartMs = null;
     return;
   }
 
@@ -541,6 +576,13 @@ function startListeningForCurrentAnimal(options = {}) {
       return;
     }
 
+    const now = getNowMs();
+    if (!attemptWindowStartMs || !preserveAttemptStart) {
+      attemptWindowStartMs = now;
+    }
+    const elapsedMs = attemptWindowStartMs ? now - attemptWindowStartMs : 0;
+    startListeningWatchdog(elapsedMs);
+
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
@@ -548,6 +590,8 @@ function startListeningForCurrentAnimal(options = {}) {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
+          clearListeningWatchdog();
+          attemptWindowStartMs = null;
           recognizing = false;
           const rawText = result && result.text ? result.text : "";
           const allResults =
@@ -565,13 +609,26 @@ function startListeningForCurrentAnimal(options = {}) {
           }
         },
         function (err) {
+          clearListeningWatchdog();
           recognizing = false;
           const code = parseErrorCode(err);
+          const elapsedMs = attemptWindowStartMs ? getNowMs() - attemptWindowStartMs : null;
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
           if (code === "NO_MATCH") {
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
             handleIncorrect({ reason: "no_match" });
+            return;
+          }
+
+          if (
+            (code === "ERROR_SPEECH_TIMEOUT" || code === "SPEECH_TIMEOUT") &&
+            elapsedMs !== null &&
+            elapsedMs < ANIMALS_LISTENING_WATCHDOG_MS
+          ) {
+            const remainingMs = Math.max(0, ANIMALS_LISTENING_WATCHDOG_MS - elapsedMs);
+            statusEl.textContent = `Still listening… you have ${(remainingMs / 1000).toFixed(1)}s left.`;
+            startListeningForCurrentAnimal({ skipPreQuestion: true, preserveAttemptStart: true });
             return;
           }
 
@@ -590,6 +647,8 @@ function startListeningForCurrentAnimal(options = {}) {
     } catch (err) {
       console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
       recognizing = false;
+      attemptWindowStartMs = null;
+      clearListeningWatchdog();
       statusEl.textContent = "Speech start failed. Retrying…";
       retryOrAdvance();
     }
@@ -607,6 +666,8 @@ function startListeningForCurrentAnimal(options = {}) {
 }
 
 function handleCorrect(animal) {
+  clearListeningWatchdog();
+  attemptWindowStartMs = null;
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
@@ -634,6 +695,8 @@ function handleCorrect(animal) {
 function handleIncorrect(options = {}) {
   const reason = options.reason || "wrong";
   attemptCount++;
+  clearListeningWatchdog();
+  attemptWindowStartMs = null;
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
   const isFirstAttempt = attemptCount === 1;
@@ -675,6 +738,8 @@ function handleIncorrect(options = {}) {
 
 function retryOrAdvance() {
   attemptCount++;
+  clearListeningWatchdog();
+  attemptWindowStartMs = null;
 
   if (attemptCount < MAX_ATTEMPTS_PER_ANIMAL) {
     startListeningForCurrentAnimal({ skipPreQuestion: true });
@@ -685,6 +750,8 @@ function retryOrAdvance() {
 
 function advanceToNextAnimal(options) {
   const skipListening = options && options.skipListening;
+  clearListeningWatchdog();
+  attemptWindowStartMs = null;
 
   currentIndex++;
 
