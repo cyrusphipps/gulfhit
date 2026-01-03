@@ -588,20 +588,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 currentTiming = timing;
                 Log.d(TAG, "LimeTunaSpeech stage=received t=" + timing.nativeReceivedMs + " expected=" + timing.expectedLetter);
 
-                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                        RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language);
-                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language);
-                intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, language);
-                intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
-                        cordova.getActivity().getPackageName());
-                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 10);
-                intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-                intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
-                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, thresholds.postSilenceMs);
-                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, Math.max(500L, thresholds.postSilenceMs / 2));
-                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L);
+                Intent intent = buildRecognizerIntent(thresholds);
 
                 try {
                     if (currentTiming != null) {
@@ -619,6 +606,38 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         });
 
         return true;
+    }
+
+    private Intent buildRecognizerIntent(ThresholdConfig config) {
+        ThresholdConfig thresholds = config != null ? config : ThresholdConfig.defaults();
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language);
+        intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, language);
+        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
+                cordova.getActivity().getPackageName());
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 10);
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+
+        long completeSilenceMs = Math.min(thresholds.maxUtteranceMs,
+                Math.max(thresholds.postSilenceMs, thresholds.minPostSilenceMs));
+        long possibleCompleteSilenceMs = Math.min(thresholds.maxUtteranceMs,
+                Math.max(500L, completeSilenceMs / 2));
+        long minInputLengthMs = thresholds.maxUtteranceMs;
+
+        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs);
+        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possibleCompleteSilenceMs);
+        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minInputLengthMs);
+
+        Log.d(TAG, "Recognizer intent silenceMs=" + completeSilenceMs +
+                " possibleSilenceMs=" + possibleCompleteSilenceMs +
+                " minInputMs=" + minInputLengthMs +
+                " maxUtteranceMs=" + thresholds.maxUtteranceMs);
+
+        return intent;
     }
 
     private boolean handleStop(final CallbackContext callbackContext) {
