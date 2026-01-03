@@ -622,13 +622,10 @@ function handleCorrect(animal) {
   if (variant) {
     plays.push(playSoundWithDelay(variant, CORRECT_VARIANT_DELAY_MS));
   }
-  if (effect) {
-    const effectDelay = CORRECT_VARIANT_DELAY_MS + CORRECT_EFFECT_DELAY_MS;
-    plays.push(playSoundWithDelay(effect, effectDelay));
-  }
 
   Promise.all(plays.map((p) => p.catch(() => {})))
     .then(() => playSoundPromise(voice))
+    .then(() => playSoundPromise(effect))
     .then(() => {
       advanceToNextAnimal();
     });
