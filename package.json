@@ -7,8 +7,6 @@
     "platforms": [
       "android"
     ],
-    "plugins": {
-      "limetuna.speech": {}
-    }
+    "plugins": {}
   }
 }
