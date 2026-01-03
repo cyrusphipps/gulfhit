@@ -42,8 +42,8 @@ const CORRECT_EFFECT_DELAY_MS = 1000;
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
   maxUtteranceMs: 20000, // allow up to 20 seconds per attempt
-  postSilenceMs: 2500,
-  minPostSilenceMs: 1600
+  postSilenceMs: 20000, // keep listening even if silent
+  minPostSilenceMs: 20000
 };
 
 let animalSequence = [];
@@ -622,13 +622,10 @@ function handleCorrect(animal) {
   if (variant) {
     plays.push(playSoundWithDelay(variant, CORRECT_VARIANT_DELAY_MS));
   }
-  if (effect) {
-    const effectDelay = CORRECT_VARIANT_DELAY_MS + CORRECT_EFFECT_DELAY_MS;
-    plays.push(playSoundWithDelay(effect, effectDelay));
-  }
 
   Promise.all(plays.map((p) => p.catch(() => {})))
     .then(() => playSoundPromise(voice))
+    .then(() => playSoundPromise(effect))
     .then(() => {
       advanceToNextAnimal();
     });
