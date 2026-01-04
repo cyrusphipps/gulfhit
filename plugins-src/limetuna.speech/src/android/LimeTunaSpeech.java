@@ -53,7 +53,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private static final long POST_SILENCE_MS = 1300L;
     private static final long NO_PARTIAL_POST_SILENCE_BOOST_MS = 350L;
     private static final long MIN_POST_SILENCE_MS = 450L;
-    private static final long MAX_UTTERANCE_MS = 22000L;
+    private static final long MAX_UTTERANCE_MS = 60000L;
     private static final float NO_PARTIAL_END_THRESHOLD_DELTA_DB = 0.4f;
     private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
     private static final int RMS_SMOOTH_TAIL_SAMPLES = 8;
