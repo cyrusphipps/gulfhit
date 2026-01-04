@@ -787,7 +787,9 @@ function startNewGame() {
     LimeTunaSpeech.init(
       {
         language: "en-US",
-        maxUtteranceMs: 20000
+        maxUtteranceMs: 20000,
+        postSilenceMs: 20000,
+        minPostSilenceMs: 20000
       },
       function () {
         console.log("LimeTunaSpeech.init success");
