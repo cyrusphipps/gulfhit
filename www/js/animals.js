@@ -41,11 +41,11 @@ const CORRECT_VARIANT_DELAY_MS = 1000;
 const CORRECT_EFFECT_DELAY_MS = 1000;
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 20000, // allow up to 20 seconds per attempt
-  postSilenceMs: 20000, // keep the mic open the full window even if the room is quiet
-  minPostSilenceMs: 20000
+  maxUtteranceMs: 22000, // allow up to 20 seconds per attempt with headroom
+  postSilenceMs: 22000, // keep the mic open the full window even if the room is quiet
+  minPostSilenceMs: 22000
 };
-const ANIMALS_LISTENING_WATCHDOG_MS = 20000;
+const ANIMALS_LISTENING_WATCHDOG_MS = 22000;
 
 let animalSequence = [];
 let currentIndex = 0;
