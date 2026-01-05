@@ -98,6 +98,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private boolean partialResultsSeen = false;
     private boolean awaitingPartialAfterBos = false;
     private long lastComputedPostSilenceDelayMs = POST_SILENCE_MS;
+    private long silenceWindowStartMs = 0L;
+    private long silenceWindowDelayMs = 0L;
     private float lastComputedEndThresholdDb = RMS_END_THRESHOLD_DB;
     private final AtomicReference<ThresholdConfig> thresholdConfig =
             new AtomicReference<>(ThresholdConfig.defaults());
@@ -1258,9 +1260,19 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 postSilenceDelayMs = Math.min(thresholds.maxUtteranceMs, postSilenceDelayMs + NO_PARTIAL_POST_SILENCE_BOOST_MS);
             }
             lastComputedPostSilenceDelayMs = postSilenceDelayMs;
+            silenceWindowStartMs = now;
+            silenceWindowDelayMs = postSilenceDelayMs;
             silenceTimeoutRunnable = new Runnable() {
                 @Override
                 public void run() {
+                    if (silenceWindowStartMs > 0 && silenceWindowDelayMs > 0) {
+                        long nowTs = SystemClock.elapsedRealtime();
+                        long targetCommitMs = silenceWindowStartMs + silenceWindowDelayMs;
+                        if (nowTs + 5 < targetCommitMs && handler != null) {
+                            handler.postDelayed(this, targetCommitMs - nowTs);
+                            return;
+                        }
+                    }
                     if (stopIssued) {
                         return;
                     }
@@ -1300,6 +1312,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             handler.removeCallbacks(silenceTimeoutRunnable);
         }
         silenceTimeoutRunnable = null;
+        silenceWindowStartMs = 0L;
+        silenceWindowDelayMs = 0L;
         belowEndThresholdSinceMs = 0L;
         if (clearEndTime && currentTiming != null && listeningState == ListeningState.SILENCE_WINDOW) {
             currentTiming.nativeRmsSpeechEndMs = 0;
@@ -1375,6 +1389,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         awaitingPartialAfterBos = false;
         partialResultsSeen = false;
         lastComputedPostSilenceDelayMs = POST_SILENCE_MS;
+        silenceWindowStartMs = 0L;
+        silenceWindowDelayMs = 0L;
         lastComputedEndThresholdDb = RMS_END_THRESHOLD_DB;
     }
 
