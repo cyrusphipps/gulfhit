@@ -543,7 +543,7 @@ function startNewGame() {
   currentAttemptHadSpeech = false;
   anySpeechHeardThisAnimal = false;
   clearListeningWatchdog();
-  engineRestartRecoveryBudget = 2;
+  engineRestartRecoveryBudget = 3;
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -603,7 +603,7 @@ function updateUIForCurrentAnimal() {
   anySpeechHeardThisAnimal = false;
   fastNoMatchSkipBudget = 1;
   lastStartedAttemptIndex = null;
-  engineRestartRecoveryBudget = 2;
+  engineRestartRecoveryBudget = 3;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -834,12 +834,13 @@ function startListeningForCurrentAnimal(options = {}) {
                 stage: "Resetting",
                 summary: `Attempting to recover from ${code}`
               });
+              const backoffMs = 120 + Math.floor(Math.random() * 181);
               LimeTunaSpeech.resetRecognizer(
                 () => {
                   attemptWindowStartMs = null;
                   setTimeout(
                     () => startListeningForCurrentAnimal({ preserveAttemptStart: false }),
-                    120
+                    backoffMs
                   );
                 },
                 () => {
@@ -851,9 +852,10 @@ function startListeningForCurrentAnimal(options = {}) {
               );
               return;
             }
+            console.warn("Speech engine restart budget exhausted; showing animals without listening.");
+            statusEl.textContent = "Speech engine restart attempts exhausted. Showing animals without listening.";
             sttFatalError = true;
             sttEnabled = false;
-            statusEl.textContent = "Speech engine unavailable. Showing animals without listening.";
             advanceToNextAnimal({ skipListening: true });
             return;
           }
