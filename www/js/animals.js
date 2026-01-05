@@ -44,6 +44,7 @@ const ANIMALS_SPEECH_OPTIONS = {
   minPostSilenceMs: 10000
 };
 const ANIMALS_LISTENING_WATCHDOG_MS = 10000;
+const NO_SPEECH_RETRY_DELAY_MS = 200;
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -739,7 +740,10 @@ function startListeningForCurrentAnimal(options = {}) {
               stage: "Retrying",
               summary: "Ignored immediate post-silence no-match; retrying same attempt."
             });
-            startListeningForCurrentAnimal({ preserveAttemptStart: false });
+            setTimeout(
+              () => startListeningForCurrentAnimal({ preserveAttemptStart: false }),
+              NO_SPEECH_RETRY_DELAY_MS
+            );
             return;
           }
 
@@ -755,7 +759,10 @@ function startListeningForCurrentAnimal(options = {}) {
               stage: "Retrying",
               summary: "No speech detected yet; keeping this chance open for the full window."
             });
-            startListeningForCurrentAnimal({ preserveAttemptStart: true });
+            setTimeout(
+              () => startListeningForCurrentAnimal({ preserveAttemptStart: true }),
+              NO_SPEECH_RETRY_DELAY_MS
+            );
             return;
           }
 
@@ -977,7 +984,15 @@ function retryOrAdvance() {
   attemptWindowStartMs = null;
   updateChanceDisplay();
 
-  if (attemptCount < MAX_ATTEMPTS_PER_ANIMAL) {
+  const hasAttemptsRemaining = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
+  const shouldRetryForSilence = !anySpeechHeardThisAnimal && hasAttemptsRemaining;
+
+  if (shouldRetryForSilence) {
+    startListeningForCurrentAnimal({ preserveAttemptStart: false });
+    return;
+  }
+
+  if (hasAttemptsRemaining) {
     startListeningForCurrentAnimal({ preserveAttemptStart: false });
   } else {
     advanceToNextAnimal();
