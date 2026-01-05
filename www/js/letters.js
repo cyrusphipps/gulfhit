@@ -8,13 +8,13 @@
 // for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0, // First RMS level that counts as "speech started"
-  rmsEndThresholdDb: 3.0,
+  rmsEndThresholdDb: 4.0,
   baselineRmsDb: null,
-  computedEndThresholdDb: 3.0
+  computedEndThresholdDb: 4.0
 };
 const SILENCE_END_BASELINE_DELTA_PERCENT = 0.45;
 const SILENCE_END_BASELINE_DELTA_DB_MIN = 2.0;
-const NATIVE_SILENCE_END_THRESHOLD_DB_MAX = 3.0;
+const NATIVE_SILENCE_END_THRESHOLD_DB_MAX = 4.0;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
