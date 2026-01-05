@@ -8,13 +8,13 @@
 // for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0, // First RMS level that counts as "speech started"
-  rmsEndThresholdDb: 4.0,
+  rmsEndThresholdDb: 200.0,
   baselineRmsDb: null,
-  computedEndThresholdDb: 4.0
+  computedEndThresholdDb: 200.0
 };
 const SILENCE_END_BASELINE_DELTA_PERCENT = 0.45;
 const SILENCE_END_BASELINE_DELTA_DB_MIN = 2.0;
-const NATIVE_SILENCE_END_THRESHOLD_DB_MAX = 4.0;
+const NATIVE_SILENCE_END_THRESHOLD_DB_FLOOR = 200.0;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
@@ -29,21 +29,21 @@ const LISTENING_WATCHDOG_MS = 60000;
 const NO_RMS_HINT_MS = 1500;
 
 function computeSilenceEndThreshold(thresholds) {
-  const endMax = thresholds && typeof thresholds.rmsEndThresholdDb === "number"
+  const baseEndThreshold = thresholds && typeof thresholds.rmsEndThresholdDb === "number"
     ? thresholds.rmsEndThresholdDb
-    : NATIVE_SILENCE_END_THRESHOLD_DB_MAX;
+    : NATIVE_SILENCE_END_THRESHOLD_DB_FLOOR;
   const baseline =
     thresholds && typeof thresholds.baselineRmsDb === "number"
       ? thresholds.baselineRmsDb
       : null;
   if (baseline === null) {
-    return endMax;
+    return baseEndThreshold;
   }
   const delta = Math.max(
     SILENCE_END_BASELINE_DELTA_DB_MIN,
     Math.abs(baseline) * SILENCE_END_BASELINE_DELTA_PERCENT
   );
-  return Math.min(endMax, baseline + delta);
+  return Math.max(baseEndThreshold, baseline + delta);
 }
 
 let LETTER_SEQUENCE = [];
@@ -485,7 +485,7 @@ function renderRmsPanel(force) {
     const silenceGate = typeof currentThresholds.computedEndThresholdDb === "number"
       ? currentThresholds.computedEndThresholdDb.toFixed(2)
       : currentThresholds.rmsEndThresholdDb;
-    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate ~${silenceGate} dB (baseline-adaptive)`;
+    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate floor ~${silenceGate} dB (baseline-adaptive)`;
   }
   lastRmsRenderMs = now;
 }
@@ -530,7 +530,7 @@ function buildStageLines(timingPayload) {
   }
   const computedEnd = computeSilenceEndThreshold(thresholds);
   rmsLabelParts.push(
-    `start gate disabled; silence gate ~${computedEnd.toFixed(2)} dB (baseline-adaptive, cap ${NATIVE_SILENCE_END_THRESHOLD_DB_MAX} dB)`
+    `start gate disabled; silence gate ~${computedEnd.toFixed(2)} dB (baseline-adaptive, floor ${NATIVE_SILENCE_END_THRESHOLD_DB_FLOOR} dB)`
   );
   const rmsLabel = ` (${rmsLabelParts.join(" · ")})`;
   if (!timingPayload || !timingPayload.native_raw) {
