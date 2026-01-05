@@ -34,18 +34,18 @@ const ANIMALS = [
 ];
 
 const TOTAL_ROUNDS = 10;
-const MAX_ATTEMPTS_PER_ANIMAL = 2;
+const MAX_ATTEMPTS_PER_ANIMAL = 4;
 const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const CORRECT_VARIANT_DELAY_MS = 1000;
 const CORRECT_EFFECT_DELAY_MS = 1000;
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 20000, // allow up to 20 seconds per attempt
-  postSilenceMs: 20000, // keep the mic open the full window even if quiet
-  minPostSilenceMs: 20000
+  maxUtteranceMs: 10000, // 10 seconds per attempt
+  postSilenceMs: 10000, // keep the mic open the full window even if quiet
+  minPostSilenceMs: 10000
 };
-const ANIMALS_LISTENING_WATCHDOG_MS = 20000;
+const ANIMALS_LISTENING_WATCHDOG_MS = 10000;
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -86,6 +86,8 @@ let animalEffectEls = {};
 let attemptWindowStartMs = null;
 let listeningWatchdogTimerId = null;
 let lastThresholds = null;
+let currentAttemptHadSpeech = false;
+let anySpeechHeardThisAnimal = false;
 
 const audioCache = new Map();
 
@@ -247,6 +249,28 @@ function chooseRandomSound(pool, lastSound) {
   return selectionPool[idx];
 }
 
+function playNoSoundPromptIfNeeded(completedAttemptNumber, animal, onComplete) {
+  if (anySpeechHeardThisAnimal) {
+    if (typeof onComplete === "function") onComplete();
+    return;
+  }
+
+  let prompt = null;
+  if (completedAttemptNumber === 1 || completedAttemptNumber === 3) {
+    prompt = animalEffectEls[animal && animal.name];
+  } else if (completedAttemptNumber === 2) {
+    prompt = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
+    if (prompt) lastOneMoreTimeSound = prompt;
+  }
+
+  if (!prompt) {
+    if (typeof onComplete === "function") onComplete();
+    return;
+  }
+
+  playSound(prompt, onComplete);
+}
+
 function pickPreQuestionSound({ isGameStart } = {}) {
   const hasRoot = soundPreQuestionRootEls.length > 0;
   const hasAnimals = soundPreQuestionAnimalEls.length > 0;
@@ -347,6 +371,10 @@ function handleDebugEvent(evt) {
   const summaryParts = [`Event: ${evt.event || "unknown"}`];
   if (commitReason) {
     summaryParts.push(`Reason: ${commitReason}`);
+  }
+  if (evt.event === "onBeginningOfSpeech") {
+    currentAttemptHadSpeech = true;
+    anySpeechHeardThisAnimal = true;
   }
   setTimingPanel({
     stage: stageLabel,
@@ -534,6 +562,8 @@ function startNewGame() {
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
   attemptWindowStartMs = null;
+  currentAttemptHadSpeech = false;
+  anySpeechHeardThisAnimal = false;
   clearListeningWatchdog();
 
   finalScoreEl.classList.add("hidden");
@@ -589,6 +619,8 @@ function startNewGame() {
 
 function updateUIForCurrentAnimal() {
   attemptCount = 0;
+  currentAttemptHadSpeech = false;
+  anySpeechHeardThisAnimal = false;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -656,11 +688,14 @@ function startListeningForCurrentAnimal(options = {}) {
       stage: "Listening",
       summary: "Waiting for speech…"
     });
+    currentAttemptHadSpeech = false;
 
     try {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
+          currentAttemptHadSpeech = true;
+          anySpeechHeardThisAnimal = true;
           clearListeningWatchdog();
           attemptWindowStartMs = null;
           recognizing = false;
@@ -761,6 +796,8 @@ function startListeningForCurrentAnimal(options = {}) {
 function handleCorrect(animal) {
   clearListeningWatchdog();
   attemptWindowStartMs = null;
+  currentAttemptHadSpeech = true;
+  anySpeechHeardThisAnimal = true;
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
@@ -787,34 +824,24 @@ function handleCorrect(animal) {
 
 function handleIncorrect(options = {}) {
   const reason = options.reason || "wrong";
+  const animal = animalSequence[currentIndex];
+  const completedAttemptNumber = attemptCount + 1;
+  const noSpeechThisAttempt = (reason === "no_match" || reason === "timeout") && !currentAttemptHadSpeech;
+  if (!noSpeechThisAttempt) {
+    anySpeechHeardThisAnimal = true;
+  }
   attemptCount++;
   clearListeningWatchdog();
   attemptWindowStartMs = null;
 
-  const isRetry = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
-  const isFirstAttempt = attemptCount === 1;
+  if (reason === "wrong" && attemptCount < MAX_ATTEMPTS_PER_ANIMAL) {
+    // Skip straight to the final chance.
+    attemptCount = MAX_ATTEMPTS_PER_ANIMAL - 1;
+  }
 
-  if (isRetry) {
-    feedbackEl.textContent = "✕ Try again!";
-    feedbackEl.style.color = "#c62828";
-    statusEl.textContent = ANIMALS_STATUS_PROMPT;
+  const hasAttemptsRemaining = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
 
-    if (reason === "no_match") {
-      const retrySound = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
-      if (retrySound) lastOneMoreTimeSound = retrySound;
-      playSound(retrySound, () => {
-        startListeningForCurrentAnimal({ skipPreQuestion: true });
-      });
-    } else {
-      const wrongVariant = isFirstAttempt
-        ? chooseRandomSound(soundWrongVariantEls, lastWrongVariantSound)
-        : null;
-      if (wrongVariant) lastWrongVariantSound = wrongVariant;
-      playAudioSequence([soundWrongEl, wrongVariant], () => {
-        startListeningForCurrentAnimal({ skipPreQuestion: true });
-      });
-    }
-  } else {
+  if (!hasAttemptsRemaining) {
     feedbackEl.textContent = "✕ Wrong answer.";
     feedbackEl.style.color = "#c62828";
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
@@ -826,7 +853,36 @@ function handleIncorrect(options = {}) {
         advanceToNextAnimal();
       });
     }
+    return;
   }
+
+  feedbackEl.textContent = reason === "no_match" ? "We didn't hear anything. Try again!" : "✕ Try again!";
+  feedbackEl.style.color = "#c62828";
+  statusEl.textContent = ANIMALS_STATUS_PROMPT;
+
+  if (noSpeechThisAttempt) {
+    playNoSoundPromptIfNeeded(completedAttemptNumber, animal, () => {
+      startListeningForCurrentAnimal({ skipPreQuestion: true });
+    });
+    return;
+  }
+
+  if (reason === "no_match") {
+    const retrySound = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
+    if (retrySound) lastOneMoreTimeSound = retrySound;
+    playSound(retrySound, () => {
+      startListeningForCurrentAnimal({ skipPreQuestion: true });
+    });
+    return;
+  }
+
+  const wrongVariant = completedAttemptNumber === 1
+    ? chooseRandomSound(soundWrongVariantEls, lastWrongVariantSound)
+    : null;
+  if (wrongVariant) lastWrongVariantSound = wrongVariant;
+  playAudioSequence([soundWrongEl, wrongVariant], () => {
+    startListeningForCurrentAnimal({ skipPreQuestion: true });
+  });
 }
 
 function retryOrAdvance() {
