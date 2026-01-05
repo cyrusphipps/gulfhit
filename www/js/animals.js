@@ -41,11 +41,11 @@ const CORRECT_VARIANT_DELAY_MS = 1000;
 const CORRECT_EFFECT_DELAY_MS = 1000;
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 60000, // allow up to 60 seconds per attempt with headroom
-  postSilenceMs: 60000, // keep the mic open the full window even if the room is quiet
-  minPostSilenceMs: 60000
+  maxUtteranceMs: 20000, // allow up to 20 seconds per attempt
+  postSilenceMs: 20000, // keep the mic open the full window even if quiet
+  minPostSilenceMs: 20000
 };
-const ANIMALS_LISTENING_WATCHDOG_MS = 60000;
+const ANIMALS_LISTENING_WATCHDOG_MS = 20000;
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -67,6 +67,10 @@ let finalScoreEl;
 let backToHomeBtn;
 let restartGameBtn;
 let animalImageEl;
+let timingPanelEl;
+let timingStageEl;
+let timingSummaryEl;
+let rmsNoteEl;
 
 let soundCorrectEl;
 let soundWrongEl;
@@ -81,6 +85,7 @@ let animalVoiceEls = {};
 let animalEffectEls = {};
 let attemptWindowStartMs = null;
 let listeningWatchdogTimerId = null;
+let lastThresholds = null;
 
 const audioCache = new Map();
 
@@ -297,6 +302,59 @@ function parseErrorCode(err) {
   return null;
 }
 
+function setTimingPanel({ stage, summary, thresholds }) {
+  if (thresholds) {
+    lastThresholds = thresholds;
+  }
+  if (timingStageEl && stage) {
+    timingStageEl.textContent = stage;
+  }
+  if (timingSummaryEl && summary) {
+    timingSummaryEl.textContent = summary;
+  }
+  if (rmsNoteEl && lastThresholds) {
+    const endEffective =
+      typeof lastThresholds.adaptive_end_threshold_db === "number"
+        ? lastThresholds.adaptive_end_threshold_db
+        : lastThresholds.rms_end_threshold_db;
+    const postSilence =
+      lastThresholds.post_silence_ms_effective !== undefined
+        ? lastThresholds.post_silence_ms_effective
+        : lastThresholds.post_silence_ms;
+    const baseline =
+      typeof lastThresholds.baseline_rms_db === "number"
+        ? lastThresholds.baseline_rms_db
+        : null;
+    const parts = [
+      `End=${endEffective != null ? endEffective.toFixed(1) : "?"} dB`,
+      `Post silence=${postSilence != null ? postSilence : "?"} ms`,
+      `Max utterance=${lastThresholds.max_utterance_ms != null ? lastThresholds.max_utterance_ms : "?"} ms`
+    ];
+    if (baseline !== null) {
+      parts.push(`Baseline=${baseline.toFixed(2)} dB`);
+    }
+    rmsNoteEl.textContent = `Thresholds: ${parts.join(" · ")}`;
+  } else if (rmsNoteEl && stage && stage.toLowerCase().indexOf("waiting") !== -1) {
+    rmsNoteEl.textContent = "Thresholds will appear after the first native update.";
+  }
+}
+
+function handleDebugEvent(evt) {
+  if (!evt || evt.type !== "event") return;
+  const thresholds = evt.timing && evt.timing.native_thresholds ? evt.timing.native_thresholds : null;
+  const commitReason = evt.extras && evt.extras.commit_reason ? evt.extras.commit_reason : null;
+  const stageLabel = (evt.event || "event").replace(/_/g, " ");
+  const summaryParts = [`Event: ${evt.event || "unknown"}`];
+  if (commitReason) {
+    summaryParts.push(`Reason: ${commitReason}`);
+  }
+  setTimingPanel({
+    stage: stageLabel,
+    summary: summaryParts.join(" · "),
+    thresholds
+  });
+}
+
 function isHardSttErrorCode(code) {
   return (
     code === "PERMISSION_DENIED" ||
@@ -393,6 +451,10 @@ function initAnimalsGame() {
   backToHomeBtn = document.getElementById("backToHomeBtn");
   restartGameBtn = document.getElementById("restartGameBtn");
   animalImageEl = document.getElementById("animalImage");
+  timingPanelEl = document.getElementById("animalsTiming");
+  timingStageEl = document.getElementById("animalsTimingStage");
+  timingSummaryEl = document.getElementById("animalsTimingSummary");
+  rmsNoteEl = document.getElementById("animalsRmsNote");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
@@ -544,6 +606,10 @@ function updateUIForCurrentAnimal() {
   animalImageEl.alt = (animal && animal.name) || "Animal";
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
+  setTimingPanel({
+    stage: "Waiting",
+    summary: "Speech debug will appear once listening starts."
+  });
 }
 
 function startListeningForCurrentAnimal(options = {}) {
@@ -556,6 +622,7 @@ function startListeningForCurrentAnimal(options = {}) {
   if (!sttEnabled || sttFatalError || !window.LimeTunaSpeech || !window.cordova) {
     statusEl.textContent = "Speech engine not available.";
     attemptWindowStartMs = null;
+    setTimingPanel({ stage: "Unavailable", summary: "Cordova speech engine missing." });
     return;
   }
 
@@ -585,6 +652,10 @@ function startListeningForCurrentAnimal(options = {}) {
 
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
+    setTimingPanel({
+      stage: "Listening",
+      summary: "Waiting for speech…"
+    });
 
     try {
       LimeTunaSpeech.startLetter(
@@ -604,8 +675,16 @@ function startListeningForCurrentAnimal(options = {}) {
 
           if (isCorrect) {
             handleCorrect(animal);
+            setTimingPanel({
+              stage: "Result",
+              summary: `Heard: "${rawText || allResults[0] || ""}" (correct)`
+            });
           } else {
             handleIncorrect({ reason: "wrong" });
+            setTimingPanel({
+              stage: "Result",
+              summary: `Heard: "${rawText || allResults[0] || ""}" (not a match)`
+            });
           }
         },
         function (err) {
@@ -618,6 +697,10 @@ function startListeningForCurrentAnimal(options = {}) {
           if (code === "NO_MATCH") {
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
             handleIncorrect({ reason: "no_match" });
+            setTimingPanel({
+              stage: "No match",
+              summary: "Recognizer ended without a match."
+            });
             return;
           }
 
@@ -629,6 +712,10 @@ function startListeningForCurrentAnimal(options = {}) {
             const remainingMs = Math.max(0, ANIMALS_LISTENING_WATCHDOG_MS - elapsedMs);
             statusEl.textContent = `Still listening… you have ${(remainingMs / 1000).toFixed(1)}s left.`;
             startListeningForCurrentAnimal({ skipPreQuestion: true, preserveAttemptStart: true });
+            setTimingPanel({
+              stage: "Retrying",
+              summary: "Timeout reported early; restarting listener."
+            });
             return;
           }
 
@@ -642,7 +729,13 @@ function startListeningForCurrentAnimal(options = {}) {
 
           statusEl.textContent = "Error starting speech. Retrying…";
           retryOrAdvance();
-        }
+          setTimingPanel({
+            stage: "Error",
+            summary: code ? `Engine reported ${code}` : "Unknown speech error"
+          });
+        },
+        null,
+        handleDebugEvent
       );
     } catch (err) {
       console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
