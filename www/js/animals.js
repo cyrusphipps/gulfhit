@@ -84,6 +84,7 @@ let lastStartedAttemptIndex = null;
 let preQuestionSounds = [];
 let animalsPreQuestionSounds = [];
 let alreadyListeningRecoveryBudget = 0;
+let engineRestartRecoveryBudget = 0;
 
 const audioCache = new Map();
 
@@ -540,6 +541,7 @@ function startNewGame() {
   currentAttemptHadSpeech = false;
   anySpeechHeardThisAnimal = false;
   clearListeningWatchdog();
+  engineRestartRecoveryBudget = 2;
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -599,6 +601,7 @@ function updateUIForCurrentAnimal() {
   anySpeechHeardThisAnimal = false;
   fastNoMatchSkipBudget = 1;
   lastStartedAttemptIndex = null;
+  engineRestartRecoveryBudget = 2;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -781,6 +784,44 @@ function startListeningForCurrentAnimal(options = {}) {
               stage: "Retrying",
               summary: "Timeout reported early; restarting listener."
             });
+            return;
+          }
+
+          if (
+            (code === "ENGINE_RESTART_REQUIRED" ||
+              code === "ENGINE_RESET" ||
+              code === "ERROR_SERVER_DISCONNECTED" ||
+              code === "ERROR_11") &&
+            typeof LimeTunaSpeech.resetRecognizer === "function"
+          ) {
+            if (engineRestartRecoveryBudget > 0) {
+              engineRestartRecoveryBudget--;
+              statusEl.textContent = "Restarting speech engine…";
+              setTimingPanel({
+                stage: "Resetting",
+                summary: `Attempting to recover from ${code}`
+              });
+              LimeTunaSpeech.resetRecognizer(
+                () => {
+                  attemptWindowStartMs = null;
+                  setTimeout(
+                    () => startListeningForCurrentAnimal({ preserveAttemptStart: false }),
+                    120
+                  );
+                },
+                () => {
+                  sttFatalError = true;
+                  sttEnabled = false;
+                  statusEl.textContent = "Speech engine restart failed. Showing animals without listening.";
+                  advanceToNextAnimal({ skipListening: true });
+                }
+              );
+              return;
+            }
+            sttFatalError = true;
+            sttEnabled = false;
+            statusEl.textContent = "Speech engine unavailable. Showing animals without listening.";
+            advanceToNextAnimal({ skipListening: true });
             return;
           }
 

@@ -976,6 +976,10 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 code = "ENGINE_RESTART_REQUIRED";
                 requestRecognizerReset(mapErrorLabel(error).toLowerCase(), false);
                 break;
+            case SpeechRecognizer.ERROR_SERVER_DISCONNECTED:
+                code = "ENGINE_RESTART_REQUIRED";
+                requestRecognizerReset("server_disconnected", false);
+                break;
             default:
                 code = "ERROR_" + error;
                 break;
