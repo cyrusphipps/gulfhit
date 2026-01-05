@@ -219,19 +219,26 @@ function updateChanceDisplay() {
   }
 }
 
-function playNoSoundPromptIfNeeded(completedAttemptNumber, animal, onComplete) {
-  if (anySpeechHeardThisAnimal) {
+function getNoMatchPrompt(completedAttemptNumber, animal) {
+  if (completedAttemptNumber === 1 || completedAttemptNumber === 3) {
+    return animalEffectEls[animal && animal.name];
+  }
+  if (completedAttemptNumber === 2) {
+    const prompt = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
+    if (prompt) lastOneMoreTimeSound = prompt;
+    return prompt;
+  }
+  return null;
+}
+
+function playNoSoundPromptIfNeeded(completedAttemptNumber, animal, onComplete, options = {}) {
+  const force = options && options.force;
+  if (anySpeechHeardThisAnimal && !force) {
     if (typeof onComplete === "function") onComplete();
     return;
   }
 
-  let prompt = null;
-  if (completedAttemptNumber === 1 || completedAttemptNumber === 3) {
-    prompt = animalEffectEls[animal && animal.name];
-  } else if (completedAttemptNumber === 2) {
-    prompt = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
-    if (prompt) lastOneMoreTimeSound = prompt;
-  }
+  const prompt = getNoMatchPrompt(completedAttemptNumber, animal);
 
   if (!prompt) {
     if (typeof onComplete === "function") onComplete();
@@ -772,10 +779,10 @@ function handleIncorrect(options = {}) {
   feedbackEl.style.color = "#c62828";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
-  if (noSpeechThisAttempt) {
+  if (reason === "no_match" || noSpeechThisAttempt) {
     playNoSoundPromptIfNeeded(completedAttemptNumber, animal, () => {
       continueListening();
-    });
+    }, { force: reason === "no_match" });
     return;
   }
 
