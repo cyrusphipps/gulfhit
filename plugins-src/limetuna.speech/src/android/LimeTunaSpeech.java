@@ -46,7 +46,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
     private static final float RMS_START_THRESHOLD_DB = -1000f;
-    private static final float RMS_END_THRESHOLD_DB = 3.0f;
+    private static final float RMS_END_THRESHOLD_DB = 4.0f;
     private static final float END_BASELINE_DELTA_PERCENT = 0.45f;
     private static final float END_BASELINE_DELTA_DB_MIN = 2.0f;
     private static final float RMS_RESUME_DELTA_DB = 0.6f;
