@@ -1501,8 +1501,9 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
             if (opts.has("maxUtteranceMs")) {
                 double candidate = opts.optDouble("maxUtteranceMs", Double.NaN);
-                if (!Double.isNaN(candidate) && candidate >= MAX_UTTERANCE_MS) {
-                    maxUtterance = (long) candidate;
+                if (!Double.isNaN(candidate)) {
+                    long clamped = Math.max(MIN_POST_SILENCE_MS, (long) candidate);
+                    maxUtterance = Math.min(clamped, MAX_UTTERANCE_MS);
                 }
             }
             if (opts.has("rmsStartThresholdDb")) {
@@ -1510,6 +1511,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
         }
 
+        postSilence = Math.min(postSilence, maxUtterance);
+        minPostSilence = Math.min(minPostSilence, maxUtterance);
         postSilence = Math.max(postSilence, minPostSilence);
         ThresholdConfig newConfig = new ThresholdConfig(start, end, RMS_RESUME_DELTA_DB, postSilence, minPostSilence, maxUtterance, RMS_VOICE_TRIGGER_DB, RMS_SMOOTH_TAIL_SAMPLES, SILENCE_HOLD_MS);
         thresholdConfig.set(newConfig);
