@@ -66,6 +66,7 @@ let timingPanelEl;
 let timingStageEl;
 let timingSummaryEl;
 let rmsNoteEl;
+let lastDebugEvent = null;
 
 let soundCorrectEl;
 let soundWrongEl;
@@ -77,6 +78,8 @@ let lastThresholds = null;
 let currentAttemptHadSpeech = false;
 let anySpeechHeardThisAnimal = false;
 let chanceEl;
+let fastNoMatchSkipBudget = 1;
+let lastStartedAttemptIndex = null;
 
 const audioCache = new Map();
 
@@ -308,6 +311,7 @@ function setTimingPanel({ stage, summary, thresholds }) {
 
 function handleDebugEvent(evt) {
   if (!evt || evt.type !== "event") return;
+  lastDebugEvent = evt;
   const thresholds = evt.timing && evt.timing.native_thresholds ? evt.timing.native_thresholds : null;
   const commitReason = evt.extras && evt.extras.commit_reason ? evt.extras.commit_reason : null;
   const stageLabel = (evt.event || "event").replace(/_/g, " ");
@@ -318,6 +322,7 @@ function handleDebugEvent(evt) {
   if (evt.event === "onBeginningOfSpeech") {
     currentAttemptHadSpeech = true;
     anySpeechHeardThisAnimal = true;
+    fastNoMatchSkipBudget = 1;
   }
   setTimingPanel({
     stage: stageLabel,
@@ -545,6 +550,8 @@ function updateUIForCurrentAnimal() {
   attemptCount = 0;
   currentAttemptHadSpeech = false;
   anySpeechHeardThisAnimal = false;
+  fastNoMatchSkipBudget = 1;
+  lastStartedAttemptIndex = null;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -574,6 +581,12 @@ function startListeningForCurrentAnimal(options = {}) {
 
   clearListeningWatchdog();
   updateChanceDisplay();
+  lastDebugEvent = null;
+
+  if (lastStartedAttemptIndex !== attemptCount) {
+    fastNoMatchSkipBudget = 1;
+    lastStartedAttemptIndex = attemptCount;
+  }
 
   if (!sttEnabled || sttFatalError || !window.LimeTunaSpeech || !window.cordova) {
     statusEl.textContent = "Speech engine not available.";
@@ -651,7 +664,30 @@ function startListeningForCurrentAnimal(options = {}) {
           recognizing = false;
           const code = parseErrorCode(err);
           const elapsedMs = attemptWindowStartMs ? getNowMs() - attemptWindowStartMs : null;
+          const lastCommit =
+            lastDebugEvent && lastDebugEvent.extras && lastDebugEvent.extras.commit_reason
+              ? lastDebugEvent.extras.commit_reason
+              : lastDebugEvent && lastDebugEvent.event;
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
+
+          if (
+            code === "NO_MATCH" &&
+            !currentAttemptHadSpeech &&
+            elapsedMs !== null &&
+            elapsedMs < 700 &&
+            lastCommit === "post_silence_commit" &&
+            fastNoMatchSkipBudget > 0
+          ) {
+            fastNoMatchSkipBudget--;
+            attemptWindowStartMs = null;
+            statusEl.textContent = "Restarting… listening again.";
+            setTimingPanel({
+              stage: "Retrying",
+              summary: "Ignored immediate post-silence no-match; retrying same attempt."
+            });
+            startListeningForCurrentAnimal({ preserveAttemptStart: false });
+            return;
+          }
 
           if (code === "NO_MATCH") {
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
