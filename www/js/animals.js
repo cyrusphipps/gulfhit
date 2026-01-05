@@ -743,6 +743,22 @@ function startListeningForCurrentAnimal(options = {}) {
             return;
           }
 
+          if (
+            code === "NO_MATCH" &&
+            !currentAttemptHadSpeech &&
+            elapsedMs !== null &&
+            elapsedMs < ANIMALS_LISTENING_WATCHDOG_MS
+          ) {
+            const remainingMs = Math.max(0, ANIMALS_LISTENING_WATCHDOG_MS - elapsedMs);
+            statusEl.textContent = `Still listening… you have ${(remainingMs / 1000).toFixed(1)}s left.`;
+            setTimingPanel({
+              stage: "Retrying",
+              summary: "No speech detected yet; keeping this chance open for the full window."
+            });
+            startListeningForCurrentAnimal({ preserveAttemptStart: true });
+            return;
+          }
+
           if (code === "NO_MATCH") {
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
             handleIncorrect({ reason: "no_match" });
