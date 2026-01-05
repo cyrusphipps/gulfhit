@@ -624,8 +624,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
         long completeSilenceMs = Math.min(thresholds.maxUtteranceMs,
                 Math.max(thresholds.postSilenceMs, thresholds.minPostSilenceMs));
-        long possibleCompleteSilenceMs = Math.min(thresholds.maxUtteranceMs,
-                Math.max(500L, completeSilenceMs / 2));
+        long possibleCompleteSilenceMs = completeSilenceMs; // Do not shorten; honor the full window
         long minInputLengthMs = thresholds.maxUtteranceMs;
 
         intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs);
