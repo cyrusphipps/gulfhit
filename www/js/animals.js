@@ -89,6 +89,74 @@ let engineRestartRecoveryBudget = 0;
 
 const audioCache = new Map();
 
+function getCoreAudioElements() {
+  return [
+    soundCorrectEl,
+    soundWrongEl,
+    ...preQuestionSounds,
+    ...animalsPreQuestionSounds
+  ].filter(Boolean);
+}
+
+function ensureAudioReadyForPrompts() {
+  getCoreAudioElements().forEach((el) => {
+    try {
+      el.muted = false;
+      el.volume = 1.0;
+      if (typeof el.load === "function") {
+        el.load();
+      }
+    } catch (e) {
+      console.warn("audio prepare error (ensure ready):", e);
+    }
+  });
+}
+
+function primeGameAudio() {
+  getCoreAudioElements().forEach((el) => {
+    try {
+      el.muted = true;
+      if (typeof el.load === "function") {
+        el.load();
+      }
+      const playPromise = el.play ? el.play() : null;
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise
+          .then(() => {
+            if (typeof el.pause === "function") {
+              el.pause();
+            }
+            try {
+              el.currentTime = 0;
+            } catch (err) {
+              // ignore
+            }
+            el.muted = false;
+          })
+          .catch(() => {
+            // Swallow autoplay rejections to avoid console noise.
+            el.muted = false;
+          });
+      } else if (typeof el.pause === "function") {
+        el.pause();
+        try {
+          el.currentTime = 0;
+        } catch (err) {
+          // ignore
+        }
+        el.muted = false;
+      }
+    } catch (e) {
+      console.warn("audio prepare error (prime):", e);
+      try {
+        el.muted = false;
+      } catch (err) {
+        // ignore
+      }
+    }
+  });
+}
+
 function getNowMs() {
   if (typeof performance !== "undefined" && typeof performance.now === "function") {
     return performance.now();
@@ -501,6 +569,8 @@ function initAnimalsGame() {
     }
   });
 
+  primeGameAudio();
+
   if (!progressEl || !statusEl || !feedbackEl || !finalScoreEl || !animalImageEl) {
     console.error("Animals screen elements not found.");
     return;
@@ -542,7 +612,7 @@ function startNewGame() {
   currentAttemptHadSpeech = false;
   anySpeechHeardThisAnimal = false;
   clearListeningWatchdog();
-  engineRestartRecoveryBudget = 2;
+  engineRestartRecoveryBudget = 3;
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -574,6 +644,7 @@ function startNewGame() {
         sttEnabled = false;
         sttFatalError = true;
         console.error("LimeTunaSpeech.init error (animals):", err);
+        ensureAudioReadyForPrompts();
         try {
           statusEl.textContent = "Init error: " + JSON.stringify(err);
         } catch (e) {
@@ -602,7 +673,7 @@ function updateUIForCurrentAnimal() {
   anySpeechHeardThisAnimal = false;
   fastNoMatchSkipBudget = 1;
   lastStartedAttemptIndex = null;
-  engineRestartRecoveryBudget = 2;
+  engineRestartRecoveryBudget = 3;
 
   const total = animalSequence.length;
   const displayIndex = Math.min(currentIndex + 1, total);
@@ -643,6 +714,7 @@ function startListeningForCurrentAnimal(options = {}) {
     statusEl.textContent = "Speech engine not available.";
     attemptWindowStartMs = null;
     setTimingPanel({ stage: "Unavailable", summary: "Cordova speech engine missing." });
+    ensureAudioReadyForPrompts();
     return;
   }
 
@@ -729,7 +801,7 @@ function startListeningForCurrentAnimal(options = {}) {
             code === "NO_MATCH" &&
             !currentAttemptHadSpeech &&
             elapsedMs !== null &&
-            elapsedMs < 700 &&
+            elapsedMs < FAST_NO_MATCH_RETRY_MS &&
             lastCommit === "post_silence_commit" &&
             fastNoMatchSkipBudget > 0
           ) {
@@ -744,6 +816,21 @@ function startListeningForCurrentAnimal(options = {}) {
               () => startListeningForCurrentAnimal({ preserveAttemptStart: false }),
               NO_SPEECH_RETRY_DELAY_MS
             );
+            return;
+          }
+
+          if (
+            code === "NO_MATCH" &&
+            !currentAttemptHadSpeech &&
+            elapsedMs !== null &&
+            elapsedMs < MIN_LISTEN_MS
+          ) {
+            statusEl.textContent = "Restarting… listening again.";
+            setTimingPanel({
+              stage: "Retrying",
+              summary: "No speech heard yet; enforcing minimum listening window."
+            });
+            startListeningForCurrentAnimal({ preserveAttemptStart: true });
             return;
           }
 
@@ -791,6 +878,7 @@ function startListeningForCurrentAnimal(options = {}) {
             sttFatalError = true;
             sttEnabled = false;
             statusEl.textContent = "Speech engine stuck in listening state. Showing animals without listening.";
+            ensureAudioReadyForPrompts();
             advanceToNextAnimal({ skipListening: true });
             return;
           }
@@ -824,26 +912,29 @@ function startListeningForCurrentAnimal(options = {}) {
                 stage: "Resetting",
                 summary: `Attempting to recover from ${code}`
               });
+              const backoffMs = 120 + Math.floor(Math.random() * 181);
               LimeTunaSpeech.resetRecognizer(
                 () => {
                   attemptWindowStartMs = null;
                   setTimeout(
                     () => startListeningForCurrentAnimal({ preserveAttemptStart: false }),
-                    120
+                    backoffMs
                   );
                 },
                 () => {
                   sttFatalError = true;
                   sttEnabled = false;
                   statusEl.textContent = "Speech engine restart failed. Showing animals without listening.";
+                  ensureAudioReadyForPrompts();
                   advanceToNextAnimal({ skipListening: true });
                 }
               );
               return;
             }
+            console.warn("Speech engine restart budget exhausted; showing animals without listening.");
+            statusEl.textContent = "Speech engine restart attempts exhausted. Showing animals without listening.";
             sttFatalError = true;
             sttEnabled = false;
-            statusEl.textContent = "Speech engine unavailable. Showing animals without listening.";
             advanceToNextAnimal({ skipListening: true });
             return;
           }
@@ -852,6 +943,7 @@ function startListeningForCurrentAnimal(options = {}) {
             sttFatalError = true;
             sttEnabled = false;
             statusEl.textContent = "Speech engine error. Showing animals without listening.";
+            ensureAudioReadyForPrompts();
             advanceToNextAnimal({ skipListening: true });
             return;
           }
@@ -887,6 +979,7 @@ function startQuestionWithPrompt(options = {}) {
     !window.LimeTunaSpeech ||
     !window.cordova;
 
+  ensureAudioReadyForPrompts();
   playPreQuestionPrompt(currentIndex, () => {
     if (skipListening) {
       if (typeof options.onSkippedListening === "function") {
