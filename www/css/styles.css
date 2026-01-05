@@ -286,6 +286,13 @@ body {
   margin-bottom: 12px;
 }
 
+.animals-chance {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: #1b2430;
+}
+
 .animal-figure {
   display: flex;
   flex-direction: column;
