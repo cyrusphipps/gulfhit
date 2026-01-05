@@ -90,6 +90,74 @@ let engineRestartRecoveryBudget = 0;
 
 const audioCache = new Map();
 
+function getCoreAudioElements() {
+  return [
+    soundCorrectEl,
+    soundWrongEl,
+    ...preQuestionSounds,
+    ...animalsPreQuestionSounds
+  ].filter(Boolean);
+}
+
+function ensureAudioReadyForPrompts() {
+  getCoreAudioElements().forEach((el) => {
+    try {
+      el.muted = false;
+      el.volume = 1.0;
+      if (typeof el.load === "function") {
+        el.load();
+      }
+    } catch (e) {
+      console.warn("audio prepare error (ensure ready):", e);
+    }
+  });
+}
+
+function primeGameAudio() {
+  getCoreAudioElements().forEach((el) => {
+    try {
+      el.muted = true;
+      if (typeof el.load === "function") {
+        el.load();
+      }
+      const playPromise = el.play ? el.play() : null;
+      if (playPromise && typeof playPromise.then === "function") {
+        playPromise
+          .then(() => {
+            if (typeof el.pause === "function") {
+              el.pause();
+            }
+            try {
+              el.currentTime = 0;
+            } catch (err) {
+              // ignore
+            }
+            el.muted = false;
+          })
+          .catch(() => {
+            // Swallow autoplay rejections to avoid console noise.
+            el.muted = false;
+          });
+      } else if (typeof el.pause === "function") {
+        el.pause();
+        try {
+          el.currentTime = 0;
+        } catch (err) {
+          // ignore
+        }
+        el.muted = false;
+      }
+    } catch (e) {
+      console.warn("audio prepare error (prime):", e);
+      try {
+        el.muted = false;
+      } catch (err) {
+        // ignore
+      }
+    }
+  });
+}
+
 function getNowMs() {
   if (typeof performance !== "undefined" && typeof performance.now === "function") {
     return performance.now();
@@ -502,6 +570,8 @@ function initAnimalsGame() {
     }
   });
 
+  primeGameAudio();
+
   if (!progressEl || !statusEl || !feedbackEl || !finalScoreEl || !animalImageEl) {
     console.error("Animals screen elements not found.");
     return;
@@ -575,6 +645,7 @@ function startNewGame() {
         sttEnabled = false;
         sttFatalError = true;
         console.error("LimeTunaSpeech.init error (animals):", err);
+        ensureAudioReadyForPrompts();
         try {
           statusEl.textContent = "Init error: " + JSON.stringify(err);
         } catch (e) {
@@ -644,6 +715,7 @@ function startListeningForCurrentAnimal(options = {}) {
     statusEl.textContent = "Speech engine not available.";
     attemptWindowStartMs = null;
     setTimingPanel({ stage: "Unavailable", summary: "Cordova speech engine missing." });
+    ensureAudioReadyForPrompts();
     return;
   }
 
@@ -801,6 +873,7 @@ function startListeningForCurrentAnimal(options = {}) {
             sttFatalError = true;
             sttEnabled = false;
             statusEl.textContent = "Speech engine stuck in listening state. Showing animals without listening.";
+            ensureAudioReadyForPrompts();
             advanceToNextAnimal({ skipListening: true });
             return;
           }
@@ -847,6 +920,7 @@ function startListeningForCurrentAnimal(options = {}) {
                   sttFatalError = true;
                   sttEnabled = false;
                   statusEl.textContent = "Speech engine restart failed. Showing animals without listening.";
+                  ensureAudioReadyForPrompts();
                   advanceToNextAnimal({ skipListening: true });
                 }
               );
@@ -864,6 +938,7 @@ function startListeningForCurrentAnimal(options = {}) {
             sttFatalError = true;
             sttEnabled = false;
             statusEl.textContent = "Speech engine error. Showing animals without listening.";
+            ensureAudioReadyForPrompts();
             advanceToNextAnimal({ skipListening: true });
             return;
           }
@@ -899,6 +974,7 @@ function startQuestionWithPrompt(options = {}) {
     !window.LimeTunaSpeech ||
     !window.cordova;
 
+  ensureAudioReadyForPrompts();
   playPreQuestionPrompt(currentIndex, () => {
     if (skipListening) {
       if (typeof options.onSkippedListening === "function") {
