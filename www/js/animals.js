@@ -83,6 +83,7 @@ let fastNoMatchSkipBudget = 1;
 let lastStartedAttemptIndex = null;
 let preQuestionSounds = [];
 let animalsPreQuestionSounds = [];
+let alreadyListeningRecoveryBudget = 0;
 
 const audioCache = new Map();
 
@@ -184,6 +185,16 @@ function playSound(elOrSrc, onEnded) {
   } catch (e) {
     console.warn("sound play exception:", e);
     if (typeof onEnded === "function") onEnded();
+  }
+}
+
+function forceStopNativeListening() {
+  if (window.cordova && window.LimeTunaSpeech && typeof LimeTunaSpeech.stop === "function") {
+    try {
+      LimeTunaSpeech.stop();
+    } catch (e) {
+      console.warn("Failed to stop native listening (safe if idle):", e);
+    }
   }
 }
 
@@ -636,6 +647,10 @@ function startListeningForCurrentAnimal(options = {}) {
     return;
   }
 
+  // Defensive: ensure the native recognizer is stopped before starting a new attempt.
+  forceStopNativeListening();
+  alreadyListeningRecoveryBudget = 1;
+
   const animal = animalSequence[currentIndex];
   if (!animal) {
     console.warn("No animal at index", currentIndex);
@@ -732,6 +747,25 @@ function startListeningForCurrentAnimal(options = {}) {
               stage: "No match",
               summary: "Recognizer ended without a match."
             });
+            return;
+          }
+
+          if (code === "ALREADY_LISTENING") {
+            forceStopNativeListening();
+            if (alreadyListeningRecoveryBudget > 0) {
+              alreadyListeningRecoveryBudget--;
+              statusEl.textContent = "Restarting listener…";
+              setTimingPanel({
+                stage: "Retrying",
+                summary: "Native engine reported busy; retrying after stop()."
+              });
+              startListeningForCurrentAnimal({ preserveAttemptStart: true });
+              return;
+            }
+            sttFatalError = true;
+            sttEnabled = false;
+            statusEl.textContent = "Speech engine stuck in listening state. Showing animals without listening.";
+            advanceToNextAnimal({ skipListening: true });
             return;
           }
 
