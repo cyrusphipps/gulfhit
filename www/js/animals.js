@@ -51,6 +51,7 @@ let correctCount = 0;
 let attemptCount = 0;
 let recognizing = false;
 let lastOneMoreTimeSound = null;
+let lastPreQuestionSound = null;
 
 let sttEnabled = false;
 let sttFatalError = false;
@@ -80,6 +81,8 @@ let anySpeechHeardThisAnimal = false;
 let chanceEl;
 let fastNoMatchSkipBudget = 1;
 let lastStartedAttemptIndex = null;
+let preQuestionSounds = [];
+let animalsPreQuestionSounds = [];
 
 const audioCache = new Map();
 
@@ -210,6 +213,27 @@ function chooseRandomSound(pool, lastSound) {
   if (!selectionPool.length) return null;
   const idx = Math.floor(Math.random() * selectionPool.length);
   return selectionPool[idx];
+}
+
+function getPreQuestionSound(questionIndex) {
+  const isFirstQuestion = questionIndex === 0;
+  const pool = isFirstQuestion
+    ? animalsPreQuestionSounds
+    : [...animalsPreQuestionSounds, ...preQuestionSounds];
+  const sound = chooseRandomSound(pool, lastPreQuestionSound);
+  if (sound) {
+    lastPreQuestionSound = sound;
+  }
+  return sound;
+}
+
+function playPreQuestionPrompt(questionIndex, onComplete) {
+  const prompt = getPreQuestionSound(questionIndex);
+  if (!prompt) {
+    if (typeof onComplete === "function") onComplete();
+    return;
+  }
+  playSound(prompt, onComplete);
 }
 
 function getDisplayChanceNumber() {
@@ -440,6 +464,16 @@ function initAnimalsGame() {
     "audio/one_more_time2.mp3",
     "audio/one_more_time3.mp3"
   ].map(getAudioElement);
+  preQuestionSounds = [
+    "audio/pre_question1.mp3",
+    "audio/pre_question2.mp3",
+    "audio/pre_question3.mp3"
+  ].map(getAudioElement);
+  animalsPreQuestionSounds = [
+    "audio/animals/pre_question1.mp3",
+    "audio/animals/pre_question2.mp3",
+    "audio/animals/pre_question3.mp3"
+  ].map(getAudioElement);
 
   ANIMALS.forEach((animal) => {
     const key = animal.name;
@@ -490,6 +524,7 @@ function startNewGame() {
   recognizing = false;
   sttFatalError = false;
   lastOneMoreTimeSound = null;
+  lastPreQuestionSound = null;
   attemptWindowStartMs = null;
   currentAttemptHadSpeech = false;
   anySpeechHeardThisAnimal = false;
@@ -519,7 +554,7 @@ function startNewGame() {
         console.log("LimeTunaSpeech.init success (animals)");
         sttEnabled = true;
         statusEl.textContent = ANIMALS_STATUS_PROMPT;
-        startListeningForCurrentAnimal();
+        startQuestionWithPrompt();
       },
       function (err) {
         sttEnabled = false;
@@ -543,6 +578,7 @@ function startNewGame() {
       }
     }
     statusEl.textContent = "Speech not available in this environment.";
+    startQuestionWithPrompt({ skipListening: true });
   }
 }
 
@@ -745,6 +781,25 @@ function startListeningForCurrentAnimal(options = {}) {
   beginListening();
 }
 
+function startQuestionWithPrompt(options = {}) {
+  const skipListening =
+    !!options.skipListening ||
+    !sttEnabled ||
+    sttFatalError ||
+    !window.LimeTunaSpeech ||
+    !window.cordova;
+
+  playPreQuestionPrompt(currentIndex, () => {
+    if (skipListening) {
+      if (typeof options.onSkippedListening === "function") {
+        options.onSkippedListening();
+      }
+      return;
+    }
+    startListeningForCurrentAnimal({ preserveAttemptStart: false });
+  });
+}
+
 function handleCorrect(animal) {
   clearListeningWatchdog();
   attemptWindowStartMs = null;
@@ -849,11 +904,14 @@ function advanceToNextAnimal(options) {
     endGame();
   } else {
     updateUIForCurrentAnimal();
-    if (sttEnabled && !sttFatalError && window.LimeTunaSpeech && window.cordova && !skipListening) {
-      startListeningForCurrentAnimal();
-    } else if (skipListening) {
-      setTimeout(() => advanceToNextAnimal({ skipListening: true }), 300);
-    }
+    const shouldSkipListening =
+      skipListening || sttFatalError || !sttEnabled || !window.LimeTunaSpeech || !window.cordova;
+    startQuestionWithPrompt({
+      skipListening: shouldSkipListening,
+      onSkippedListening: shouldSkipListening
+        ? () => setTimeout(() => advanceToNextAnimal({ skipListening: true }), 300)
+        : null
+    });
   }
 }
 
