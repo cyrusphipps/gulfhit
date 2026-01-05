@@ -44,6 +44,8 @@ const ANIMALS_SPEECH_OPTIONS = {
   minPostSilenceMs: 10000
 };
 const ANIMALS_LISTENING_WATCHDOG_MS = 10000;
+const MIN_LISTEN_MS = 1200;
+const FAST_NO_MATCH_RETRY_MS = 1300;
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -728,7 +730,7 @@ function startListeningForCurrentAnimal(options = {}) {
             code === "NO_MATCH" &&
             !currentAttemptHadSpeech &&
             elapsedMs !== null &&
-            elapsedMs < 700 &&
+            elapsedMs < FAST_NO_MATCH_RETRY_MS &&
             lastCommit === "post_silence_commit" &&
             fastNoMatchSkipBudget > 0
           ) {
@@ -740,6 +742,21 @@ function startListeningForCurrentAnimal(options = {}) {
               summary: "Ignored immediate post-silence no-match; retrying same attempt."
             });
             startListeningForCurrentAnimal({ preserveAttemptStart: false });
+            return;
+          }
+
+          if (
+            code === "NO_MATCH" &&
+            !currentAttemptHadSpeech &&
+            elapsedMs !== null &&
+            elapsedMs < MIN_LISTEN_MS
+          ) {
+            statusEl.textContent = "Restarting… listening again.";
+            setTimingPanel({
+              stage: "Retrying",
+              summary: "No speech heard yet; enforcing minimum listening window."
+            });
+            startListeningForCurrentAnimal({ preserveAttemptStart: true });
             return;
           }
 
