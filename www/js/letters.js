@@ -27,6 +27,7 @@ const SILENCE_BELOW_SUSTAIN_MS = 120;
 const POST_SILENCE_MS = 1300;
 const LISTENING_WATCHDOG_MS = 60000;
 const NO_RMS_HINT_MS = 1500;
+const CUTOFF_DEBUG_SOURCE = "plugins-src/limetuna.speech/src/android/LimeTunaSpeech.java";
 
 function computeSilenceEndThreshold(thresholds) {
   const baseEndThreshold = thresholds && typeof thresholds.rmsEndThresholdDb === "number"
@@ -113,6 +114,7 @@ const rmsDebugState = {
 };
 let postSilenceDeadlineMs = null;
 let silenceBelowSinceMs = null;
+let lastCutoffDebugNote = null;
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -438,6 +440,46 @@ function handleNativeRmsUpdate(payload) {
   rmsDebugState.lastUpdateMs = now;
 }
 
+function handleNativeDebugEvent(evt) {
+  if (!evt || typeof evt !== "object") return;
+  const eventLabel = typeof evt.event === "string" ? evt.event : null;
+  const commitReason =
+    evt && evt.extras && typeof evt.extras.commit_reason === "string" ? evt.extras.commit_reason : null;
+  if (!commitReason && (!eventLabel || eventLabel.indexOf("commit") === -1)) {
+    return;
+  }
+
+  const thresholds =
+    evt && evt.timing && evt.timing.native_thresholds ? evt.timing.native_thresholds : null;
+  const endThreshold =
+    thresholds && typeof thresholds.rms_end_threshold_db === "number"
+      ? thresholds.rms_end_threshold_db
+      : null;
+
+  const summaryParts = [`Cutoff reason: ${commitReason || eventLabel}`];
+  if (endThreshold !== null) {
+    summaryParts.push(`native rms_end_threshold_db=${endThreshold}`);
+  }
+  summaryParts.push(`Source: ${CUTOFF_DEBUG_SOURCE}`);
+  const note = summaryParts.join(" · ");
+  if (note === lastCutoffDebugNote) return;
+  lastCutoffDebugNote = note;
+
+  if (statusEl) {
+    statusEl.textContent = [note, statusEl.textContent].filter(Boolean).join("\n");
+  }
+
+  const existingSummary = timingDisplayState && timingDisplayState.summaryText ? timingDisplayState.summaryText : "";
+  const combinedSummary =
+    existingSummary && existingSummary.indexOf(note) === -1 ? `${existingSummary}\n${note}` : note;
+  updateTimingPanel(
+    {
+      summaryText: combinedSummary
+    },
+    true
+  );
+}
+
 function renderRmsPanel(force) {
   if (!rmsPanelEl || !rmsNowEl || !rmsMinMaxEl) return;
   const now = performance.now();
@@ -754,6 +796,7 @@ function startNewGame() {
   sttFatalError = false;
   currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
   clearListeningWatchdog();
+  lastCutoffDebugNote = null;
   updateTimingPanel(
     {
       stageText: "Timing idle",
@@ -1182,6 +1225,9 @@ function startListeningForCurrentLetter() {
         if (payload && payload.type === "ready") {
           renderNativeReady(payload);
         }
+      },
+      function (debugEvent) {
+        handleNativeDebugEvent(debugEvent);
       }
     );
   } catch (err) {
