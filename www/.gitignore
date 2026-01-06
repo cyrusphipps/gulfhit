@@ -1,0 +1,15 @@
+# Cordova / generated
+platforms/
+plugins/
+node_modules/
+
+# Gradle / Android Studio
+.gradle/
+.idea/
+*.iml
+/build/
+app/build/
+
+# OS junk
+.DS_Store
+Thumbs.db
