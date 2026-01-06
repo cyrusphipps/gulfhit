@@ -40,8 +40,9 @@ const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
   maxUtteranceMs: 11000, // allow longer utterances for this game
-  postSilenceMs: 2500,
-  minPostSilenceMs: 1600
+  // Keep the microphone open for a full 10s on each attempt before timing out.
+  postSilenceMs: 10000,
+  minPostSilenceMs: 10000
 };
 
 let animalSequence = [];
