@@ -46,14 +46,14 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
 
     // Start gating is disabled: begin tracking speech immediately and rely only on the end threshold.
     private static final float RMS_START_THRESHOLD_DB = -1000f;
-    private static final float RMS_END_THRESHOLD_DB = 200.0f;
+    private static final float RMS_END_THRESHOLD_DB = 2.5f;
     private static final float END_BASELINE_DELTA_PERCENT = 0.45f;
     private static final float END_BASELINE_DELTA_DB_MIN = 2.0f;
     private static final float RMS_RESUME_DELTA_DB = 0.6f;
     private static final long POST_SILENCE_MS = 1300L;
     private static final long NO_PARTIAL_POST_SILENCE_BOOST_MS = 350L;
     private static final long MIN_POST_SILENCE_MS = 450L;
-    private static final long MAX_UTTERANCE_MS = 60000L;
+    private static final long MAX_UTTERANCE_MS = 3800L;
     private static final float NO_PARTIAL_END_THRESHOLD_DELTA_DB = 0.4f;
     private static final int ZERO_RMS_STREAK_THRESHOLD = 12;
     private static final int RMS_SMOOTH_TAIL_SAMPLES = 8;
@@ -98,8 +98,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
     private boolean partialResultsSeen = false;
     private boolean awaitingPartialAfterBos = false;
     private long lastComputedPostSilenceDelayMs = POST_SILENCE_MS;
-    private long silenceWindowStartMs = 0L;
-    private long silenceWindowDelayMs = 0L;
     private float lastComputedEndThresholdDb = RMS_END_THRESHOLD_DB;
     private final AtomicReference<ThresholdConfig> thresholdConfig =
             new AtomicReference<>(ThresholdConfig.defaults());
@@ -590,7 +588,20 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 currentTiming = timing;
                 Log.d(TAG, "LimeTunaSpeech stage=received t=" + timing.nativeReceivedMs + " expected=" + timing.expectedLetter);
 
-                Intent intent = buildRecognizerIntent(thresholds);
+                Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
+                        RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language);
+                intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language);
+                intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, language);
+                intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
+                        cordova.getActivity().getPackageName());
+                intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 10);
+                intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+                intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
+                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, thresholds.postSilenceMs);
+                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, Math.max(500L, thresholds.postSilenceMs / 2));
+                intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 500L);
 
                 try {
                     if (currentTiming != null) {
@@ -608,37 +619,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         });
 
         return true;
-    }
-
-    private Intent buildRecognizerIntent(ThresholdConfig config) {
-        ThresholdConfig thresholds = config != null ? config : ThresholdConfig.defaults();
-        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_WEB_SEARCH);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, language);
-        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language);
-        intent.putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, language);
-        intent.putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE,
-                cordova.getActivity().getPackageName());
-        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 10);
-        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-        intent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, false);
-
-        long completeSilenceMs = Math.min(thresholds.maxUtteranceMs,
-                Math.max(thresholds.postSilenceMs, thresholds.minPostSilenceMs));
-        long possibleCompleteSilenceMs = completeSilenceMs; // Do not shorten; honor the full window
-        long minInputLengthMs = thresholds.maxUtteranceMs;
-
-        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, completeSilenceMs);
-        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, possibleCompleteSilenceMs);
-        intent.putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, minInputLengthMs);
-
-        Log.d(TAG, "Recognizer intent silenceMs=" + completeSilenceMs +
-                " possibleSilenceMs=" + possibleCompleteSilenceMs +
-                " minInputMs=" + minInputLengthMs +
-                " maxUtteranceMs=" + thresholds.maxUtteranceMs);
-
-        return intent;
     }
 
     private boolean handleStop(final CallbackContext callbackContext) {
@@ -976,10 +956,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 code = "ENGINE_RESTART_REQUIRED";
                 requestRecognizerReset(mapErrorLabel(error).toLowerCase(), false);
                 break;
-            case SpeechRecognizer.ERROR_SERVER_DISCONNECTED:
-                code = "ENGINE_RESTART_REQUIRED";
-                requestRecognizerReset("server_disconnected", false);
-                break;
             default:
                 code = "ERROR_" + error;
                 break;
@@ -1264,19 +1240,9 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
                 postSilenceDelayMs = Math.min(thresholds.maxUtteranceMs, postSilenceDelayMs + NO_PARTIAL_POST_SILENCE_BOOST_MS);
             }
             lastComputedPostSilenceDelayMs = postSilenceDelayMs;
-            silenceWindowStartMs = now;
-            silenceWindowDelayMs = postSilenceDelayMs;
             silenceTimeoutRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    if (silenceWindowStartMs > 0 && silenceWindowDelayMs > 0) {
-                        long nowTs = SystemClock.elapsedRealtime();
-                        long targetCommitMs = silenceWindowStartMs + silenceWindowDelayMs;
-                        if (nowTs + 5 < targetCommitMs && handler != null) {
-                            handler.postDelayed(this, targetCommitMs - nowTs);
-                            return;
-                        }
-                    }
                     if (stopIssued) {
                         return;
                     }
@@ -1316,8 +1282,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             handler.removeCallbacks(silenceTimeoutRunnable);
         }
         silenceTimeoutRunnable = null;
-        silenceWindowStartMs = 0L;
-        silenceWindowDelayMs = 0L;
         belowEndThresholdSinceMs = 0L;
         if (clearEndTime && currentTiming != null && listeningState == ListeningState.SILENCE_WINDOW) {
             currentTiming.nativeRmsSpeechEndMs = 0;
@@ -1373,7 +1337,7 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         if (!Float.isNaN(baseline)) {
             float deltaFromBaseline = Math.max(END_BASELINE_DELTA_DB_MIN,
                     Math.abs(baseline) * END_BASELINE_DELTA_PERCENT);
-            base = Math.max(base, baseline + deltaFromBaseline);
+            base = baseline + deltaFromBaseline;
         }
         return base;
     }
@@ -1393,8 +1357,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
         awaitingPartialAfterBos = false;
         partialResultsSeen = false;
         lastComputedPostSilenceDelayMs = POST_SILENCE_MS;
-        silenceWindowStartMs = 0L;
-        silenceWindowDelayMs = 0L;
         lastComputedEndThresholdDb = RMS_END_THRESHOLD_DB;
     }
 
@@ -1520,9 +1482,8 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
             if (opts.has("maxUtteranceMs")) {
                 double candidate = opts.optDouble("maxUtteranceMs", Double.NaN);
-                if (!Double.isNaN(candidate)) {
-                    long clamped = Math.max(MIN_POST_SILENCE_MS, (long) candidate);
-                    maxUtterance = Math.min(clamped, MAX_UTTERANCE_MS);
+                if (!Double.isNaN(candidate) && candidate >= MAX_UTTERANCE_MS) {
+                    maxUtterance = (long) candidate;
                 }
             }
             if (opts.has("rmsStartThresholdDb")) {
@@ -1530,8 +1491,6 @@ public class LimeTunaSpeech extends CordovaPlugin implements RecognitionListener
             }
         }
 
-        postSilence = Math.min(postSilence, maxUtterance);
-        minPostSilence = Math.min(minPostSilence, maxUtterance);
         postSilence = Math.max(postSilence, minPostSilence);
         ThresholdConfig newConfig = new ThresholdConfig(start, end, RMS_RESUME_DELTA_DB, postSilence, minPostSilence, maxUtterance, RMS_VOICE_TRIGGER_DB, RMS_SMOOTH_TAIL_SAMPLES, SILENCE_HOLD_MS);
         thresholdConfig.set(newConfig);
