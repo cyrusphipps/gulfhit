@@ -39,10 +39,11 @@ const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
-  maxUtteranceMs: 11000, // allow longer utterances for this game
+  maxUtteranceMs: 10000, // allow longer utterances for this game
   postSilenceMs: 2500,
   minPostSilenceMs: 1600
 };
+const ATTEMPT_TIMEOUT_MS = 10000;
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -53,6 +54,7 @@ let lastWrongVariantSound = null;
 let lastOneMoreTimeSound = null;
 let lastPreQuestionFolder = null;
 let preQuestionFolderStreak = 0;
+let listeningTimeoutId = null;
 
 let sttEnabled = false;
 let sttFatalError = false;
@@ -204,9 +206,10 @@ function chooseRandomSound(pool, lastSound) {
 
 function pickRetryPromptSound(animal) {
   const effect = animal && animalEffectEls[animal.name];
-  const shouldUseEffect = effect && Math.random() < 0.5;
+  const hasEffect = !!effect;
+  const useEffect = hasEffect && Math.random() < 0.5;
 
-  if (shouldUseEffect) {
+  if (useEffect) {
     return { sound: effect, fromOneMoreTimePool: false };
   }
 
@@ -451,6 +454,7 @@ function startNewGame() {
   lastOneMoreTimeSound = null;
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
+  clearListeningTimeout();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -552,12 +556,14 @@ function startListeningForCurrentAnimal(options = {}) {
 
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
+    startListeningTimeout(animal);
 
     try {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
           recognizing = false;
+          clearListeningTimeout();
           const rawText = result && result.text ? result.text : "";
           const allResults =
             result && Array.isArray(result.allResults) ? result.allResults.slice() : [];
@@ -575,6 +581,7 @@ function startListeningForCurrentAnimal(options = {}) {
         },
         function (err) {
           recognizing = false;
+          clearListeningTimeout();
           const code = parseErrorCode(err);
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
 
@@ -599,6 +606,7 @@ function startListeningForCurrentAnimal(options = {}) {
     } catch (err) {
       console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
       recognizing = false;
+      clearListeningTimeout();
       statusEl.textContent = "Speech start failed. Retrying…";
       retryOrAdvance();
     }
@@ -616,6 +624,7 @@ function startListeningForCurrentAnimal(options = {}) {
 }
 
 function handleCorrect(animal) {
+  clearListeningTimeout();
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
@@ -631,6 +640,7 @@ function handleCorrect(animal) {
 }
 
 function handleIncorrect(options = {}) {
+  clearListeningTimeout();
   const reason = options.reason || "wrong";
   const animal = options.animal || null;
   attemptCount++;
@@ -674,6 +684,7 @@ function handleIncorrect(options = {}) {
 }
 
 function retryOrAdvance() {
+  clearListeningTimeout();
   attemptCount++;
 
   if (attemptCount < MAX_ATTEMPTS_PER_ANIMAL) {
@@ -684,6 +695,7 @@ function retryOrAdvance() {
 }
 
 function advanceToNextAnimal(options) {
+  clearListeningTimeout();
   const skipListening = options && options.skipListening;
 
   currentIndex++;
@@ -701,6 +713,7 @@ function advanceToNextAnimal(options) {
 }
 
 function endGame() {
+  clearListeningTimeout();
   const total = animalSequence.length;
   statusEl.textContent = "";
   feedbackEl.textContent = "";
@@ -740,4 +753,22 @@ if (window.cordova) {
     console.log("No Cordova detected, running Animals game in browser mode (no speech).");
     initAnimalsGame();
   });
+}
+
+function clearListeningTimeout() {
+  if (listeningTimeoutId) {
+    clearTimeout(listeningTimeoutId);
+    listeningTimeoutId = null;
+  }
+}
+
+function startListeningTimeout(animal) {
+  clearListeningTimeout();
+  listeningTimeoutId = setTimeout(() => {
+    listeningTimeoutId = null;
+    if (!recognizing) return;
+    console.warn("[animals] listening timed out; retrying");
+    recognizing = false;
+    handleIncorrect({ reason: "no_match", animal });
+  }, ATTEMPT_TIMEOUT_MS);
 }
