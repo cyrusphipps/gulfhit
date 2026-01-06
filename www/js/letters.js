@@ -25,7 +25,7 @@ const RMS_ROLLING_WINDOW_SAMPLES = 5;
 const RMS_SHORT_WINDOW_MS = 350;
 const SILENCE_BELOW_SUSTAIN_MS = 120;
 const POST_SILENCE_MS = 1300;
-const LISTENING_WATCHDOG_MS = 10000;
+const LISTENING_WATCHDOG_MS_BY_ATTEMPT = [10000, 10000];
 const NO_RMS_HINT_MS = 1500;
 
 function computeSilenceEndThreshold(thresholds) {
@@ -44,6 +44,14 @@ function computeSilenceEndThreshold(thresholds) {
     Math.abs(baseline) * SILENCE_END_BASELINE_DELTA_PERCENT
   );
   return Math.min(endMax, baseline + delta);
+}
+
+function getListeningWatchdogMs(attemptNumber) {
+  if (!attemptNumber || attemptNumber < 1) {
+    return LISTENING_WATCHDOG_MS_BY_ATTEMPT[0];
+  }
+  const index = Math.min(attemptNumber - 1, LISTENING_WATCHDOG_MS_BY_ATTEMPT.length - 1);
+  return LISTENING_WATCHDOG_MS_BY_ATTEMPT[index];
 }
 
 let LETTER_SEQUENCE = [];
@@ -704,12 +712,13 @@ function handleNoSpeechDetected(expectedUpper) {
   retryOrAdvance();
 }
 
-function startListeningWatchdog(expectedUpper) {
+function startListeningWatchdog(expectedUpper, attemptNumber) {
   clearListeningWatchdog();
+  const watchdogMs = getListeningWatchdogMs(attemptNumber);
   listeningWatchdogTimerId = setTimeout(() => {
     if (!recognizing) return;
     handleNoSpeechDetected(expectedUpper);
-  }, LISTENING_WATCHDOG_MS);
+  }, watchdogMs);
 }
 
 function clearNoRmsHintTimer() {
@@ -897,7 +906,7 @@ function startListeningForCurrentLetter() {
   rmsSeenThisAttempt = false;
   clearPostSilenceTimer();
   startRmsDebugSession();
-  startListeningWatchdog(expected.toUpperCase());
+  startListeningWatchdog(expected.toUpperCase(), attemptNumber);
   startNoRmsHintTimer(attemptLabel);
   statusEl.textContent = `Listening for ${attemptLabel} (waiting for Android speech engine)…`;
   console.log("[letters] stage=startListening", {
