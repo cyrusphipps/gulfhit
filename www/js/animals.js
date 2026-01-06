@@ -76,6 +76,10 @@ let soundPreQuestionRootEls = [];
 let soundPreQuestionAnimalEls = [];
 let animalVoiceEls = {};
 let animalEffectEls = {};
+let attemptTimeoutId = null;
+let questionReminderTimeouts = [];
+let currentAttemptToken = 0;
+let currentQuestionToken = 0;
 
 const audioCache = new Map();
 
@@ -191,6 +195,58 @@ function playAudioSequence(sequence, onComplete) {
   };
 
   playNext(0);
+}
+
+function clearAttemptTimeout() {
+  if (attemptTimeoutId) {
+    clearTimeout(attemptTimeoutId);
+    attemptTimeoutId = null;
+  }
+}
+
+function clearQuestionReminders() {
+  if (!questionReminderTimeouts.length) return;
+  questionReminderTimeouts.forEach((timerId) => clearTimeout(timerId));
+  questionReminderTimeouts = [];
+}
+
+function scheduleQuestionReminders({ animal, questionToken }) {
+  if (!animal) return;
+  if (questionReminderTimeouts.length) return;
+
+  const effectSound = animalEffectEls[animal.name];
+  const reminderQuestionToken = questionToken;
+
+  const schedule = (delayMs) => {
+    const timerId = setTimeout(() => {
+      if (currentQuestionToken !== reminderQuestionToken) return;
+      playSound(effectSound);
+    }, delayMs);
+    questionReminderTimeouts.push(timerId);
+  };
+
+  schedule(5000);
+  schedule(15000);
+}
+
+function startAttemptTimeout({ attemptToken, animal }) {
+  clearAttemptTimeout();
+
+  attemptTimeoutId = setTimeout(() => {
+    if (currentAttemptToken !== attemptToken) return;
+    recognizing = false;
+    statusEl.textContent = `We didn't hear anything for the ${animal ? animal.name : "animal"}. Let's try again.`;
+
+    if (window.cordova && window.LimeTunaSpeech && typeof LimeTunaSpeech.stop === "function") {
+      try {
+        LimeTunaSpeech.stop();
+      } catch (e) {
+        console.warn("Failed to stop speech on timeout (animals):", e);
+      }
+    }
+
+    handleIncorrect({ reason: "timeout" });
+  }, 10000);
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -431,6 +487,8 @@ function startNewGame() {
   lastOneMoreTimeSound = null;
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
+  currentAttemptToken = 0;
+  currentQuestionToken = 0;
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -484,6 +542,11 @@ function startNewGame() {
 }
 
 function updateUIForCurrentAnimal() {
+  clearAttemptTimeout();
+  clearQuestionReminders();
+  currentAttemptToken++;
+  currentQuestionToken++;
+
   attemptCount = 0;
 
   const total = animalSequence.length;
@@ -524,6 +587,10 @@ function startListeningForCurrentAnimal(options = {}) {
     return;
   }
 
+  clearAttemptTimeout();
+  currentAttemptToken++;
+  const attemptToken = currentAttemptToken;
+
   const beginListening = () => {
     if (recognizing) {
       console.log("Already recognizing; ignoring extra start.");
@@ -532,11 +599,16 @@ function startListeningForCurrentAnimal(options = {}) {
 
     recognizing = true;
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
+    if (isFirstAttempt) {
+      scheduleQuestionReminders({ animal, questionToken: currentQuestionToken });
+    }
+    startAttemptTimeout({ attemptToken, animal });
 
     try {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
+          clearAttemptTimeout();
           recognizing = false;
           const rawText = result && result.text ? result.text : "";
           const allResults =
@@ -554,6 +626,7 @@ function startListeningForCurrentAnimal(options = {}) {
           }
         },
         function (err) {
+          clearAttemptTimeout();
           recognizing = false;
           const code = parseErrorCode(err);
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);
@@ -578,6 +651,7 @@ function startListeningForCurrentAnimal(options = {}) {
       );
     } catch (err) {
       console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
+      clearAttemptTimeout();
       recognizing = false;
       statusEl.textContent = "Speech start failed. Retrying…";
       retryOrAdvance();
@@ -596,6 +670,9 @@ function startListeningForCurrentAnimal(options = {}) {
 }
 
 function handleCorrect(animal) {
+  clearAttemptTimeout();
+  clearQuestionReminders();
+
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
@@ -611,8 +688,14 @@ function handleCorrect(animal) {
 }
 
 function handleIncorrect(options = {}) {
+  clearAttemptTimeout();
+
   const reason = options.reason || "wrong";
   attemptCount++;
+  const shouldClearReminders = reason !== "timeout";
+  if (shouldClearReminders) {
+    clearQuestionReminders();
+  }
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
   const isFirstAttempt = attemptCount === 1;
@@ -663,6 +746,8 @@ function retryOrAdvance() {
 }
 
 function advanceToNextAnimal(options) {
+  clearAttemptTimeout();
+  clearQuestionReminders();
   const skipListening = options && options.skipListening;
 
   currentIndex++;
