@@ -25,7 +25,7 @@ const RMS_ROLLING_WINDOW_SAMPLES = 5;
 const RMS_SHORT_WINDOW_MS = 350;
 const SILENCE_BELOW_SUSTAIN_MS = 120;
 const POST_SILENCE_MS = 1300;
-const LISTENING_WATCHDOG_MS = 8000;
+const LISTENING_WATCHDOG_MS = 10000;
 const NO_RMS_HINT_MS = 1500;
 
 function computeSilenceEndThreshold(thresholds) {
@@ -781,7 +781,8 @@ function startNewGame() {
 
     LimeTunaSpeech.init(
       {
-        language: "en-US"
+        language: "en-US",
+        maxUtteranceMs: 10000
       },
       function () {
         console.log("LimeTunaSpeech.init success");
