@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gulfhit 1.2.6 · Animals</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+  />
+<link rel="stylesheet" href="css/styles.css" />
+
+<!-- MUST load cordova.js here too -->
+<script src="cordova.js"></script>
+
+<!-- Animals game logic -->
+<script src="js/animals.js" defer></script>
+
+</head>
+<body>
+  <div id="animalsApp" class="animals-app">
+    <header class="app-header">
+      <h1 class="app-title">Gulfhit 1.2.6</h1>
+      <p class="app-subtitle">Animals game – say the animal</p>
+    </header>
+
+    <main class="animals-main">
+      <section class="animals-card">
+        <div class="animals-progress" id="animalsProgress">
+          1 / 10
+        </div>
+
+        <div class="animal-figure">
+          <div class="animal-image-frame">
+            <img id="animalImage" class="animal-image" src="img/animals/dog1.webp" alt="Dog" />
+          </div>
+        </div>
+
+        <div class="animals-status" id="animalsStatus">
+          Get ready to say what you see!
+        </div>
+
+        <div class="animals-feedback" id="animalsFeedback">
+          <!-- Correct / wrong feedback here -->
+        </div>
+
+        <div class="animals-final-score hidden" id="finalScore">
+          <!-- Final score will appear here -->
+        </div>
+
+        <div class="animals-controls">
+          <button id="restartGameBtn" class="btn-secondary hidden">
+            Restart game
+          </button>
+          <button id="backToHomeBtn" class="btn-tertiary">
+            ← Back to games
+          </button>
+        </div>
+
+      </section>
+    </main>
+  </div>
+
+  <!-- Audio feedback -->
+  <audio id="soundCorrect" src="audio/correct.wav" preload="auto"></audio>
+  <audio id="soundWrong" src="audio/wrong.wav" preload="auto"></audio>
+  <audio id="soundWin" src="audio/win.wav" preload="auto"></audio>
+  <audio id="soundLose" src="audio/lose.wav" preload="auto"></audio>
+</body>
+</html>
