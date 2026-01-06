@@ -8,13 +8,13 @@
 // for the indicator.
 const SPEECH_INDICATOR_THRESHOLDS = {
   rmsVoiceTriggerDb: -2.0, // First RMS level that counts as "speech started"
-  rmsEndThresholdDb: 200.0,
+  rmsEndThresholdDb: 2.5,
   baselineRmsDb: null,
-  computedEndThresholdDb: 200.0
+  computedEndThresholdDb: 2.5
 };
 const SILENCE_END_BASELINE_DELTA_PERCENT = 0.45;
 const SILENCE_END_BASELINE_DELTA_DB_MIN = 2.0;
-const NATIVE_SILENCE_END_THRESHOLD_DB_FLOOR = 200.0;
+const NATIVE_SILENCE_END_THRESHOLD_DB_MAX = 2.5;
 
 const ALL_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const MAX_ATTEMPTS_PER_LETTER = 2;
@@ -25,26 +25,25 @@ const RMS_ROLLING_WINDOW_SAMPLES = 5;
 const RMS_SHORT_WINDOW_MS = 350;
 const SILENCE_BELOW_SUSTAIN_MS = 120;
 const POST_SILENCE_MS = 1300;
-const LISTENING_WATCHDOG_MS = 60000;
+const LISTENING_WATCHDOG_MS = 8000;
 const NO_RMS_HINT_MS = 1500;
-const CUTOFF_DEBUG_SOURCE = "plugins-src/limetuna.speech/src/android/LimeTunaSpeech.java";
 
 function computeSilenceEndThreshold(thresholds) {
-  const baseEndThreshold = thresholds && typeof thresholds.rmsEndThresholdDb === "number"
+  const endMax = thresholds && typeof thresholds.rmsEndThresholdDb === "number"
     ? thresholds.rmsEndThresholdDb
-    : NATIVE_SILENCE_END_THRESHOLD_DB_FLOOR;
+    : NATIVE_SILENCE_END_THRESHOLD_DB_MAX;
   const baseline =
     thresholds && typeof thresholds.baselineRmsDb === "number"
       ? thresholds.baselineRmsDb
       : null;
   if (baseline === null) {
-    return baseEndThreshold;
+    return endMax;
   }
   const delta = Math.max(
     SILENCE_END_BASELINE_DELTA_DB_MIN,
     Math.abs(baseline) * SILENCE_END_BASELINE_DELTA_PERCENT
   );
-  return Math.max(baseEndThreshold, baseline + delta);
+  return Math.min(endMax, baseline + delta);
 }
 
 let LETTER_SEQUENCE = [];
@@ -52,8 +51,6 @@ let currentIndex = 0;
 let correctCount = 0;
 let attemptCount = 0;
 let recognizing = false;
-let attemptWindowStartMs = null;
-let attemptRestartCount = 0;
 
 let sttEnabled = false;
 let sttFatalError = false;
@@ -114,7 +111,6 @@ const rmsDebugState = {
 };
 let postSilenceDeadlineMs = null;
 let silenceBelowSinceMs = null;
-let lastCutoffDebugNote = null;
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -440,46 +436,6 @@ function handleNativeRmsUpdate(payload) {
   rmsDebugState.lastUpdateMs = now;
 }
 
-function handleNativeDebugEvent(evt) {
-  if (!evt || typeof evt !== "object") return;
-  const eventLabel = typeof evt.event === "string" ? evt.event : null;
-  const commitReason =
-    evt && evt.extras && typeof evt.extras.commit_reason === "string" ? evt.extras.commit_reason : null;
-  if (!commitReason && (!eventLabel || eventLabel.indexOf("commit") === -1)) {
-    return;
-  }
-
-  const thresholds =
-    evt && evt.timing && evt.timing.native_thresholds ? evt.timing.native_thresholds : null;
-  const endThreshold =
-    thresholds && typeof thresholds.rms_end_threshold_db === "number"
-      ? thresholds.rms_end_threshold_db
-      : null;
-
-  const summaryParts = [`Cutoff reason: ${commitReason || eventLabel}`];
-  if (endThreshold !== null) {
-    summaryParts.push(`native rms_end_threshold_db=${endThreshold}`);
-  }
-  summaryParts.push(`Source: ${CUTOFF_DEBUG_SOURCE}`);
-  const note = summaryParts.join(" · ");
-  if (note === lastCutoffDebugNote) return;
-  lastCutoffDebugNote = note;
-
-  if (statusEl) {
-    statusEl.textContent = [note, statusEl.textContent].filter(Boolean).join("\n");
-  }
-
-  const existingSummary = timingDisplayState && timingDisplayState.summaryText ? timingDisplayState.summaryText : "";
-  const combinedSummary =
-    existingSummary && existingSummary.indexOf(note) === -1 ? `${existingSummary}\n${note}` : note;
-  updateTimingPanel(
-    {
-      summaryText: combinedSummary
-    },
-    true
-  );
-}
-
 function renderRmsPanel(force) {
   if (!rmsPanelEl || !rmsNowEl || !rmsMinMaxEl) return;
   const now = performance.now();
@@ -527,7 +483,7 @@ function renderRmsPanel(force) {
     const silenceGate = typeof currentThresholds.computedEndThresholdDb === "number"
       ? currentThresholds.computedEndThresholdDb.toFixed(2)
       : currentThresholds.rmsEndThresholdDb;
-    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate floor ~${silenceGate} dB (baseline-adaptive)`;
+    rmsScaleEl.textContent = `Scale: approx −2…10 dB · Start gate disabled; silence gate ~${silenceGate} dB (baseline-adaptive)`;
   }
   lastRmsRenderMs = now;
 }
@@ -572,7 +528,7 @@ function buildStageLines(timingPayload) {
   }
   const computedEnd = computeSilenceEndThreshold(thresholds);
   rmsLabelParts.push(
-    `start gate disabled; silence gate ~${computedEnd.toFixed(2)} dB (baseline-adaptive, floor ${NATIVE_SILENCE_END_THRESHOLD_DB_FLOOR} dB)`
+    `start gate disabled; silence gate ~${computedEnd.toFixed(2)} dB (baseline-adaptive, cap ${NATIVE_SILENCE_END_THRESHOLD_DB_MAX} dB)`
   );
   const rmsLabel = ` (${rmsLabelParts.join(" · ")})`;
   if (!timingPayload || !timingPayload.native_raw) {
@@ -750,13 +706,10 @@ function handleNoSpeechDetected(expectedUpper) {
 
 function startListeningWatchdog(expectedUpper) {
   clearListeningWatchdog();
-  const nowMs = performance.now();
-  const elapsedMs = attemptWindowStartMs !== null ? nowMs - attemptWindowStartMs : 0;
-  const remainingMs = attemptWindowStartMs === null ? LISTENING_WATCHDOG_MS : Math.max(0, LISTENING_WATCHDOG_MS - elapsedMs);
   listeningWatchdogTimerId = setTimeout(() => {
     if (!recognizing) return;
     handleNoSpeechDetected(expectedUpper);
-  }, remainingMs);
+  }, LISTENING_WATCHDOG_MS);
 }
 
 function clearNoRmsHintTimer() {
@@ -796,7 +749,6 @@ function startNewGame() {
   sttFatalError = false;
   currentThresholds = Object.assign({}, SPEECH_INDICATOR_THRESHOLDS);
   clearListeningWatchdog();
-  lastCutoffDebugNote = null;
   updateTimingPanel(
     {
       stageText: "Timing idle",
@@ -829,10 +781,7 @@ function startNewGame() {
 
     LimeTunaSpeech.init(
       {
-        language: "en-US",
-        maxUtteranceMs: 20000,
-        postSilenceMs: 20000,
-        minPostSilenceMs: 20000
+        language: "en-US"
       },
       function () {
         console.log("LimeTunaSpeech.init success");
@@ -880,8 +829,6 @@ function startNewGame() {
 function updateUIForCurrentLetter() {
   attemptCount = 0;
   noMatchSpeechRetryUsed = false;
-  attemptWindowStartMs = null;
-  attemptRestartCount = 0;
   resetTimingIndicator();
 
   const total = LETTER_SEQUENCE.length;
@@ -920,21 +867,12 @@ function startListeningForCurrentLetter() {
   clearNoRmsHintTimer();
 
   recognizing = true;
-  const nowMs = performance.now();
-  if (attemptWindowStartMs === null) {
-    attemptWindowStartMs = nowMs;
-    attemptRestartCount = 0;
-  } else {
-    attemptRestartCount++;
-  }
   const attemptToken = ++currentAttemptToken;
   const attemptNumber = attemptCount + 1;
   const attemptLabel = `${expected.toUpperCase()} attempt ${attemptNumber}/${MAX_ATTEMPTS_PER_LETTER}`;
-  lastListenStartTs = nowMs;
+  lastListenStartTs = performance.now();
   currentAttemptTiming = {
     js_start_ms: lastListenStartTs,
-    js_attempt_anchor_ms: attemptWindowStartMs,
-    js_attempt_restarts: attemptRestartCount,
     attemptToken,
     expectedUpper: expected.toUpperCase()
   };
@@ -1099,7 +1037,6 @@ function startListeningForCurrentLetter() {
         const sawAnyRms = rmsSeenThisAttempt;
         const now = performance.now();
         const engineMs = now - lastListenStartTs;
-        const attemptWindowElapsedMs = attemptWindowStartMs !== null ? now - attemptWindowStartMs : engineMs;
         recordJsTiming("js_got_result_ms");
         enterPostSilenceWindow();
         stopRmsDebugSession();
@@ -1138,23 +1075,6 @@ function startListeningForCurrentLetter() {
           true
         );
         resetTimingIndicator();
-
-        if (code === "SPEECH_TIMEOUT" && attemptWindowElapsedMs < LISTENING_WATCHDOG_MS) {
-          const remainingBudgetMs = LISTENING_WATCHDOG_MS - attemptWindowElapsedMs;
-          statusEl.textContent = [
-            `Speech timeout after ~${engineMs.toFixed(0)} ms for ${attemptLabel}.`,
-            `Keeping this attempt alive; ${(remainingBudgetMs / 1000).toFixed(1)}s remain in the ${LISTENING_WATCHDOG_MS / 1000}s window.`,
-            engineBreakdownText,
-            `Timings: ${summaryText}`
-          ].join("\n");
-          console.warn("[letters] speech timeout before minimum window; restarting attempt", {
-            attemptWindowElapsedMs,
-            remainingBudgetMs,
-            attemptRestartCount
-          });
-          startListeningForCurrentLetter();
-          return;
-        }
 
         if (code === "NO_MATCH") {
           const lines = [`No match heard for ${attemptLabel} (~${engineMs.toFixed(0)} ms).`];
@@ -1225,9 +1145,6 @@ function startListeningForCurrentLetter() {
         if (payload && payload.type === "ready") {
           renderNativeReady(payload);
         }
-      },
-      function (debugEvent) {
-        handleNativeDebugEvent(debugEvent);
       }
     );
   } catch (err) {
@@ -1255,8 +1172,6 @@ function startListeningForCurrentLetter() {
 
 function handleCorrect() {
   const isLast = currentIndex === LETTER_SEQUENCE.length - 1;
-  attemptWindowStartMs = null;
-  attemptRestartCount = 0;
 
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
@@ -1276,8 +1191,6 @@ function handleCorrect() {
 
 function handleIncorrect() {
   attemptCount++;
-  attemptWindowStartMs = null;
-  attemptRestartCount = 0;
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_LETTER;
 
@@ -1308,8 +1221,6 @@ function handleIncorrect() {
 
 function retryOrAdvance() {
   attemptCount++;
-  attemptWindowStartMs = null;
-  attemptRestartCount = 0;
 
   if (attemptCount < MAX_ATTEMPTS_PER_LETTER) {
     startListeningForCurrentLetter();
