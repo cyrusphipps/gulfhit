@@ -202,6 +202,26 @@ function chooseRandomSound(pool, lastSound) {
   return selectionPool[idx];
 }
 
+function pickRetryPromptSound(animal) {
+  const effect = animal && animalEffectEls[animal.name];
+  const shouldUseEffect = effect && Math.random() < 0.5;
+
+  if (shouldUseEffect) {
+    return { sound: effect, fromOneMoreTimePool: false };
+  }
+
+  const retrySound = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
+  if (retrySound) {
+    return { sound: retrySound, fromOneMoreTimePool: true };
+  }
+
+  if (effect) {
+    return { sound: effect, fromOneMoreTimePool: false };
+  }
+
+  return { sound: null, fromOneMoreTimePool: false };
+}
+
 function pickPreQuestionSound({ isGameStart } = {}) {
   const hasRoot = soundPreQuestionRootEls.length > 0;
   const hasAnimals = soundPreQuestionAnimalEls.length > 0;
@@ -550,7 +570,7 @@ function startListeningForCurrentAnimal(options = {}) {
           if (isCorrect) {
             handleCorrect(animal);
           } else {
-            handleIncorrect({ reason: "wrong" });
+            handleIncorrect({ reason: "wrong", animal });
           }
         },
         function (err) {
@@ -560,7 +580,7 @@ function startListeningForCurrentAnimal(options = {}) {
 
           if (code === "NO_MATCH") {
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
-            handleIncorrect({ reason: "no_match" });
+            handleIncorrect({ reason: "no_match", animal });
             return;
           }
 
@@ -612,6 +632,7 @@ function handleCorrect(animal) {
 
 function handleIncorrect(options = {}) {
   const reason = options.reason || "wrong";
+  const animal = options.animal || null;
   attemptCount++;
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
@@ -623,8 +644,8 @@ function handleIncorrect(options = {}) {
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
     if (reason === "no_match") {
-      const retrySound = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
-      if (retrySound) lastOneMoreTimeSound = retrySound;
+      const { sound: retrySound, fromOneMoreTimePool } = pickRetryPromptSound(animal);
+      if (fromOneMoreTimePool && retrySound) lastOneMoreTimeSound = retrySound;
       playSound(retrySound, () => {
         startListeningForCurrentAnimal({ skipPreQuestion: true });
       });
