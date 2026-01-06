@@ -78,6 +78,10 @@ let soundPreQuestionRootEls = [];
 let soundPreQuestionAnimalEls = [];
 let animalVoiceEls = {};
 let animalEffectEls = {};
+let attemptTimeoutId = null;
+let questionReminderTimeouts = [];
+let currentAttemptToken = 0;
+let currentQuestionToken = 0;
 
 const audioCache = new Map();
 
@@ -193,6 +197,58 @@ function playAudioSequence(sequence, onComplete) {
   };
 
   playNext(0);
+}
+
+function clearAttemptTimeout() {
+  if (attemptTimeoutId) {
+    clearTimeout(attemptTimeoutId);
+    attemptTimeoutId = null;
+  }
+}
+
+function clearQuestionReminders() {
+  if (!questionReminderTimeouts.length) return;
+  questionReminderTimeouts.forEach((timerId) => clearTimeout(timerId));
+  questionReminderTimeouts = [];
+}
+
+function scheduleQuestionReminders({ animal, questionToken }) {
+  if (!animal) return;
+  if (questionReminderTimeouts.length) return;
+
+  const effectSound = animalEffectEls[animal.name];
+  const reminderQuestionToken = questionToken;
+
+  const schedule = (delayMs) => {
+    const timerId = setTimeout(() => {
+      if (currentQuestionToken !== reminderQuestionToken) return;
+      playSound(effectSound);
+    }, delayMs);
+    questionReminderTimeouts.push(timerId);
+  };
+
+  schedule(5000);
+  schedule(15000);
+}
+
+function startAttemptTimeout({ attemptToken, animal }) {
+  clearAttemptTimeout();
+
+  attemptTimeoutId = setTimeout(() => {
+    if (currentAttemptToken !== attemptToken) return;
+    recognizing = false;
+    statusEl.textContent = `We didn't hear anything for the ${animal ? animal.name : "animal"}. Let's try again.`;
+
+    if (window.cordova && window.LimeTunaSpeech && typeof LimeTunaSpeech.stop === "function") {
+      try {
+        LimeTunaSpeech.stop();
+      } catch (e) {
+        console.warn("Failed to stop speech on timeout (animals):", e);
+      }
+    }
+
+    handleIncorrect({ reason: "timeout" });
+  }, 10000);
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -508,6 +564,11 @@ function startNewGame() {
 }
 
 function updateUIForCurrentAnimal() {
+  clearAttemptTimeout();
+  clearQuestionReminders();
+  currentAttemptToken++;
+  currentQuestionToken++;
+
   attemptCount = 0;
 
   const total = animalSequence.length;
@@ -548,6 +609,10 @@ function startListeningForCurrentAnimal(options = {}) {
     return;
   }
 
+  clearAttemptTimeout();
+  currentAttemptToken++;
+  const attemptToken = currentAttemptToken;
+
   const beginListening = () => {
     if (recognizing) {
       console.log("Already recognizing; ignoring extra start.");
@@ -562,6 +627,7 @@ function startListeningForCurrentAnimal(options = {}) {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
+          clearAttemptTimeout();
           recognizing = false;
           clearListeningTimeout();
           const rawText = result && result.text ? result.text : "";
@@ -576,10 +642,11 @@ function startListeningForCurrentAnimal(options = {}) {
           if (isCorrect) {
             handleCorrect(animal);
           } else {
-            handleIncorrect({ reason: "wrong", animal });
+            handleIncorrect({ reason: "wrong" });
           }
         },
         function (err) {
+          clearAttemptTimeout();
           recognizing = false;
           clearListeningTimeout();
           const code = parseErrorCode(err);
@@ -587,7 +654,7 @@ function startListeningForCurrentAnimal(options = {}) {
 
           if (code === "NO_MATCH") {
             statusEl.textContent = "We couldn't hear that clearly. Try again.";
-            handleIncorrect({ reason: "no_match", animal });
+            handleIncorrect({ reason: "no_match" });
             return;
           }
 
@@ -605,6 +672,7 @@ function startListeningForCurrentAnimal(options = {}) {
       );
     } catch (err) {
       console.error("LimeTunaSpeech.startLetter threw synchronously (animals)", err);
+      clearAttemptTimeout();
       recognizing = false;
       clearListeningTimeout();
       statusEl.textContent = "Speech start failed. Retrying…";
@@ -642,8 +710,11 @@ function handleCorrect(animal) {
 function handleIncorrect(options = {}) {
   clearListeningTimeout();
   const reason = options.reason || "wrong";
-  const animal = options.animal || null;
   attemptCount++;
+  const shouldClearReminders = reason !== "timeout";
+  if (shouldClearReminders) {
+    clearQuestionReminders();
+  }
 
   const isRetry = attemptCount < MAX_ATTEMPTS_PER_ANIMAL;
   const isFirstAttempt = attemptCount === 1;
@@ -654,8 +725,8 @@ function handleIncorrect(options = {}) {
     statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
     if (reason === "no_match") {
-      const { sound: retrySound, fromOneMoreTimePool } = pickRetryPromptSound(animal);
-      if (fromOneMoreTimePool && retrySound) lastOneMoreTimeSound = retrySound;
+      const retrySound = chooseRandomSound(soundOneMoreTimeEls, lastOneMoreTimeSound);
+      if (retrySound) lastOneMoreTimeSound = retrySound;
       playSound(retrySound, () => {
         startListeningForCurrentAnimal({ skipPreQuestion: true });
       });
