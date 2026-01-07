@@ -36,6 +36,7 @@ const ANIMALS = [
 const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
+const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
@@ -214,7 +215,16 @@ function playAudioSequence(sequence, onComplete) {
 }
 
 function playCorrectSequence(correct, variant, celebration, effect, onComplete) {
-  playAudioSequence([correct, variant, celebration, effect], onComplete);
+  const correctEl = getAudioElement(correct);
+  const durationMs =
+    correctEl && Number.isFinite(correctEl.duration) && correctEl.duration > 0
+      ? Math.round(correctEl.duration * 1000)
+      : CORRECT_SOUND_DURATION_MS;
+
+  playSound(correctEl);
+  setTimeout(() => {
+    playAudioSequence([variant, celebration, effect], onComplete);
+  }, durationMs);
 }
 
 function chooseRandomSound(pool, lastSound) {
