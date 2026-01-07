@@ -129,7 +129,12 @@ function buildAnimalSequence() {
 
 function getAudioElement(source) {
   if (!source) return null;
-  if (typeof HTMLAudioElement !== "undefined" && source instanceof HTMLAudioElement) return source;
+  if (typeof HTMLAudioElement !== "undefined" && source instanceof HTMLAudioElement) {
+    source.preload = "auto";
+    source.muted = false;
+    source.volume = 1.0;
+    return source;
+  }
 
   if (audioCache.has(source)) return audioCache.get(source);
 
@@ -139,6 +144,19 @@ function getAudioElement(source) {
   audio.volume = 1.0;
   audioCache.set(source, audio);
   return audio;
+}
+
+function primeAudioElements(elements) {
+  (elements || []).filter(Boolean).forEach((el) => {
+    try {
+      el.preload = "auto";
+      if (typeof el.load === "function") {
+        el.load();
+      }
+    } catch (e) {
+      console.warn("audio preload failed:", e);
+    }
+  });
 }
 
 function playSound(elOrSrc, onEnded) {
@@ -385,6 +403,20 @@ function initAnimalsGame() {
     animalVoiceEls[key] = getAudioElement(`audio/animals/${base}_v.mp3`);
     animalEffectEls[key] = getAudioElement(`audio/animals/${base}_e.wav`);
   });
+
+  primeAudioElements([
+    soundCorrectEl,
+    soundWrongEl,
+    soundWinEl,
+    soundLoseEl,
+    ...soundCorrectVariantEls,
+    ...soundWrongVariantEls,
+    ...soundOneMoreTimeEls,
+    ...soundPreQuestionRootEls,
+    ...soundPreQuestionAnimalEls,
+    ...Object.values(animalVoiceEls),
+    ...Object.values(animalEffectEls)
+  ]);
 
   [soundCorrectEl, soundWrongEl, soundWinEl, soundLoseEl].forEach((el) => {
     if (el) {
