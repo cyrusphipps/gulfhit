@@ -106,7 +106,7 @@ function initLimetunaPortal() {
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 1.6.8 portal");
+  console.log("Cordova deviceready fired, initializing Gulfhit 1.6.9 portal");
   initLimetunaPortal();
 }
 
