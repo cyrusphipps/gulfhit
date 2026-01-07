@@ -75,8 +75,9 @@ let soundWrongVariantEls = [];
 let soundOneMoreTimeEls = [];
 let soundPreQuestionRootEls = [];
 let soundPreQuestionAnimalEls = [];
-let animalVoiceEls = {};
+let animalCelebrationEls = {};
 let animalEffectEls = {};
+let lastAnimalCelebrationSound = {};
 
 const audioCache = new Map();
 
@@ -212,103 +213,8 @@ function playAudioSequence(sequence, onComplete) {
   playNext(0);
 }
 
-function playVariantWithEarlyVoice(variant, voice, effect, onComplete) {
-  const variantEl = getAudioElement(variant);
-  const voiceEl = getAudioElement(voice);
-  const effectEl = getAudioElement(effect);
-
-  if (!variantEl) {
-    if (voiceEl) {
-      playSound(voiceEl, () => {
-        if (effectEl) {
-          playSound(effectEl, onComplete);
-        } else if (typeof onComplete === "function") {
-          onComplete();
-        }
-      });
-    } else if (effectEl) {
-      playSound(effectEl, onComplete);
-    } else if (typeof onComplete === "function") {
-      onComplete();
-    }
-    return;
-  }
-
-  let variantEnded = false;
-  let voiceStarted = false;
-  let voiceEnded = !voiceEl;
-  let effectPlayed = false;
-
-  const finishIfReady = () => {
-    if (!variantEnded || !voiceEnded || effectPlayed) return;
-    if (effectEl) {
-      effectPlayed = true;
-      playSound(effectEl, onComplete);
-    } else if (typeof onComplete === "function") {
-      onComplete();
-    }
-  };
-
-  const startVoice = () => {
-    if (!voiceEl || voiceStarted) {
-      if (!voiceEl) {
-        voiceEnded = true;
-        finishIfReady();
-      }
-      return;
-    }
-
-    voiceStarted = true;
-    playSound(voiceEl, () => {
-      voiceEnded = true;
-      finishIfReady();
-    });
-  };
-
-  const scheduleVoice = () => {
-    if (!voiceEl || voiceStarted) return;
-    const duration = Number.isFinite(variantEl.duration) ? variantEl.duration : null;
-    if (duration && duration > 0) {
-      const targetTime = Math.max(0, duration - 0.5);
-      if (variantEl.currentTime >= targetTime) {
-        startVoice();
-        return;
-      }
-      const onTimeUpdate = () => {
-        if (variantEl.currentTime >= targetTime) {
-          variantEl.removeEventListener("timeupdate", onTimeUpdate);
-          startVoice();
-        }
-      };
-      variantEl.addEventListener("timeupdate", onTimeUpdate);
-      variantEl.addEventListener(
-        "ended",
-        () => {
-          variantEl.removeEventListener("timeupdate", onTimeUpdate);
-        },
-        { once: true }
-      );
-    } else {
-      startVoice();
-    }
-  };
-
-  playSound(variantEl, () => {
-    variantEnded = true;
-    if (!voiceStarted) {
-      startVoice();
-    } else {
-      finishIfReady();
-    }
-  });
-
-  scheduleVoice();
-}
-
-function playCorrectSequence(correct, variant, voice, effect, onComplete) {
-  playSound(correct, () => {
-    playVariantWithEarlyVoice(variant, voice, effect, onComplete);
-  });
+function playCorrectSequence(correct, variant, celebration, effect, onComplete) {
+  playAudioSequence([correct, variant, celebration, effect], onComplete);
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -476,9 +382,13 @@ function initAnimalsGame() {
   soundWrongEl = document.getElementById("soundWrong");
   soundWinEl = document.getElementById("soundWin");
   soundLoseEl = document.getElementById("soundLose");
-  soundCorrectVariantEls = ["audio/correct_v1.mp3", "audio/correct_v2.mp3", "audio/correct_v3.mp3"].map(
-    getAudioElement
-  );
+  soundCorrectVariantEls = [
+    "audio/correct_v1.mp3",
+    "audio/correct_v2.mp3",
+    "audio/correct_v3.mp3",
+    "audio/correct_v4.mp3",
+    "audio/correct_v5.mp3"
+  ].map(getAudioElement);
   soundWrongVariantEls = ["audio/wrong_v1.mp3", "audio/wrong_v2.mp3", "audio/wrong_v3.mp3"].map(
     getAudioElement
   );
@@ -499,7 +409,11 @@ function initAnimalsGame() {
   ANIMALS.forEach((animal) => {
     const key = animal.name;
     const base = (animal.name || "").toLowerCase();
-    animalVoiceEls[key] = getAudioElement(`audio/animals/${base}_v.mp3`);
+    animalCelebrationEls[key] = [
+      `audio/animals/${base}_cv1.mp3`,
+      `audio/animals/${base}_cv2.mp3`,
+      `audio/animals/${base}_cv3.mp3`
+    ].map(getAudioElement);
     animalEffectEls[key] = getAudioElement(`audio/animals/${base}_e.wav`);
   });
 
@@ -513,7 +427,7 @@ function initAnimalsGame() {
     ...soundOneMoreTimeEls,
     ...soundPreQuestionRootEls,
     ...soundPreQuestionAnimalEls,
-    ...Object.values(animalVoiceEls),
+    ...Object.values(animalCelebrationEls).flat(),
     ...Object.values(animalEffectEls)
   ]);
 
@@ -563,6 +477,7 @@ function startNewGame() {
   lastOneMoreTimeSound = null;
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
+  lastAnimalCelebrationSound = {};
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -735,9 +650,12 @@ function handleCorrect(animal) {
   correctCount++;
 
   const variant = chooseRandomSound(soundCorrectVariantEls);
-  const voice = animalVoiceEls[animal.name];
+  const celebrationPool = animalCelebrationEls[animal.name] || [];
+  const lastCelebration = lastAnimalCelebrationSound[animal.name];
+  const celebration = chooseRandomSound(celebrationPool, lastCelebration);
+  if (celebration) lastAnimalCelebrationSound[animal.name] = celebration;
   const effect = animalEffectEls[animal.name];
-  playCorrectSequence(soundCorrectEl, variant, voice, effect, () => {
+  playCorrectSequence(soundCorrectEl, variant, celebration, effect, () => {
     advanceToNextAnimal();
   });
 }
