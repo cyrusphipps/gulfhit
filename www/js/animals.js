@@ -37,7 +37,7 @@ const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
-const CORRECT_VARIANT_OVERLAP_MS = 700;
+const CORRECT_VARIANT_OVERLAP_MS = 1100;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
