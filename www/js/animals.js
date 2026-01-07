@@ -212,6 +212,105 @@ function playAudioSequence(sequence, onComplete) {
   playNext(0);
 }
 
+function playVariantWithEarlyVoice(variant, voice, effect, onComplete) {
+  const variantEl = getAudioElement(variant);
+  const voiceEl = getAudioElement(voice);
+  const effectEl = getAudioElement(effect);
+
+  if (!variantEl) {
+    if (voiceEl) {
+      playSound(voiceEl, () => {
+        if (effectEl) {
+          playSound(effectEl, onComplete);
+        } else if (typeof onComplete === "function") {
+          onComplete();
+        }
+      });
+    } else if (effectEl) {
+      playSound(effectEl, onComplete);
+    } else if (typeof onComplete === "function") {
+      onComplete();
+    }
+    return;
+  }
+
+  let variantEnded = false;
+  let voiceStarted = false;
+  let voiceEnded = !voiceEl;
+  let effectPlayed = false;
+
+  const finishIfReady = () => {
+    if (!variantEnded || !voiceEnded || effectPlayed) return;
+    if (effectEl) {
+      effectPlayed = true;
+      playSound(effectEl, onComplete);
+    } else if (typeof onComplete === "function") {
+      onComplete();
+    }
+  };
+
+  const startVoice = () => {
+    if (!voiceEl || voiceStarted) {
+      if (!voiceEl) {
+        voiceEnded = true;
+        finishIfReady();
+      }
+      return;
+    }
+
+    voiceStarted = true;
+    playSound(voiceEl, () => {
+      voiceEnded = true;
+      finishIfReady();
+    });
+  };
+
+  const scheduleVoice = () => {
+    if (!voiceEl || voiceStarted) return;
+    const duration = Number.isFinite(variantEl.duration) ? variantEl.duration : null;
+    if (duration && duration > 0) {
+      const targetTime = Math.max(0, duration - 0.5);
+      if (variantEl.currentTime >= targetTime) {
+        startVoice();
+        return;
+      }
+      const onTimeUpdate = () => {
+        if (variantEl.currentTime >= targetTime) {
+          variantEl.removeEventListener("timeupdate", onTimeUpdate);
+          startVoice();
+        }
+      };
+      variantEl.addEventListener("timeupdate", onTimeUpdate);
+      variantEl.addEventListener(
+        "ended",
+        () => {
+          variantEl.removeEventListener("timeupdate", onTimeUpdate);
+        },
+        { once: true }
+      );
+    } else {
+      startVoice();
+    }
+  };
+
+  playSound(variantEl, () => {
+    variantEnded = true;
+    if (!voiceStarted) {
+      startVoice();
+    } else {
+      finishIfReady();
+    }
+  });
+
+  scheduleVoice();
+}
+
+function playCorrectSequence(correct, variant, voice, effect, onComplete) {
+  playSound(correct, () => {
+    playVariantWithEarlyVoice(variant, voice, effect, onComplete);
+  });
+}
+
 function chooseRandomSound(pool, lastSound) {
   if (!Array.isArray(pool) || !pool.length) return null;
   const filtered = pool.filter((item) => item && item !== lastSound);
@@ -638,7 +737,7 @@ function handleCorrect(animal) {
   const variant = chooseRandomSound(soundCorrectVariantEls);
   const voice = animalVoiceEls[animal.name];
   const effect = animalEffectEls[animal.name];
-  playAudioSequence([soundCorrectEl, variant, voice, effect], () => {
+  playCorrectSequence(soundCorrectEl, variant, voice, effect, () => {
     advanceToNextAnimal();
   });
 }
