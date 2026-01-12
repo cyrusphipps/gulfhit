@@ -3,32 +3,32 @@
 const ANIMALS = [
   {
     name: "Dog",
-    images: ["img/animals/dog1.webp", "img/animals/dog2.webp", "img/animals/dog3.webp"],
+    base: "dog",
     keywords: ["dog", "puppy"]
   },
   {
     name: "Cat",
-    images: ["img/animals/cat1.webp", "img/animals/cat2.webp", "img/animals/cat3.webp"],
+    base: "cat",
     keywords: ["cat", "kitten"]
   },
   {
     name: "Fish",
-    images: ["img/animals/fish1.webp", "img/animals/fish2.webp", "img/animals/fish3.webp"],
+    base: "fish",
     keywords: ["fish"]
   },
   {
     name: "Bird",
-    images: ["img/animals/bird1.webp", "img/animals/bird2.webp", "img/animals/bird3.webp"],
+    base: "bird",
     keywords: ["bird", "parrot"]
   },
   {
     name: "Spider",
-    images: ["img/animals/spider1.webp", "img/animals/spider2.webp", "img/animals/spider3.webp"],
+    base: "spider",
     keywords: ["spider"]
   },
   {
     name: "Horse",
-    images: ["img/animals/horse1.webp", "img/animals/horse2.webp", "img/animals/horse3.webp"],
+    base: "horse",
     keywords: ["horse", "pony"]
   }
 ];
@@ -36,6 +36,7 @@ const ANIMALS = [
 const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
+const ANIMAL_IMAGE_VARIANTS = 5;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const CORRECT_VARIANT_OVERLAP_MS = 2000;
 const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
@@ -80,8 +81,40 @@ let soundPreQuestionAnimalEls = [];
 let animalCelebrationEls = {};
 let animalEffectEls = {};
 let lastAnimalCelebrationSound = {};
+let currentOrientation = "portrait";
+let currentAnimalEntry = null;
 
 const audioCache = new Map();
+const ORIENTATION_QUERY = "(orientation: landscape)";
+
+function getOrientation() {
+  if (typeof window !== "undefined" && window.matchMedia) {
+    return window.matchMedia(ORIENTATION_QUERY).matches ? "landscape" : "portrait";
+  }
+  if (typeof window !== "undefined") {
+    return window.innerWidth > window.innerHeight ? "landscape" : "portrait";
+  }
+  return "portrait";
+}
+
+function getAnimalImagePath(animal, imageNumber, orientation) {
+  if (!animal) return "";
+  const base = (animal.base || animal.name || "").toLowerCase();
+  if (!base) return "";
+  const variant = Number.isFinite(imageNumber) ? imageNumber : 1;
+  const suffix = orientation === "landscape" ? "l" : "p";
+  return `img/animals/${base}_${suffix}${variant}.webp`;
+}
+
+function setAnimalImageForOrientation(animal, imageNumber, orientation) {
+  if (!animalImageEl) return;
+  const imagePath = getAnimalImagePath(animal, imageNumber, orientation);
+  if (!imagePath) return;
+  const currentSrc = animalImageEl.getAttribute("src");
+  if (currentSrc !== imagePath) {
+    animalImageEl.setAttribute("src", imagePath);
+  }
+}
 
 function shuffleArray(arr) {
   const copy = arr.slice();
@@ -96,10 +129,13 @@ function buildAnimalSequence() {
   const imagePool = [];
 
   ANIMALS.forEach((animal) => {
-    const variants = Array.isArray(animal.images) && animal.images.length ? animal.images : [animal.image];
-    variants.forEach((imagePath) => {
-      imagePool.push({ animal, image: imagePath });
-    });
+    for (let i = 1; i <= ANIMAL_IMAGE_VARIANTS; i++) {
+      imagePool.push({
+        animal,
+        imageNumber: i,
+        imageKey: `${animal.base || animal.name}-${i}`
+      });
+    }
   });
 
   const animalCounts = new Map();
@@ -109,7 +145,8 @@ function buildAnimalSequence() {
 
   while (result.length < TOTAL_ROUNDS) {
     const availablePool = imagePool.filter(
-      (entry) => !usedImages.has(entry.image) && (animalCounts.get(entry.animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
+      (entry) =>
+        !usedImages.has(entry.imageKey) && (animalCounts.get(entry.animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
     );
 
     if (!availablePool.length) break;
@@ -120,11 +157,11 @@ function buildAnimalSequence() {
 
     result.push({
       ...entry.animal,
-      image: entry.image
+      imageNumber: entry.imageNumber
     });
     animalCounts.set(entry.animal.name, (animalCounts.get(entry.animal.name) || 0) + 1);
     lastAnimalName = entry.animal.name;
-    usedImages.add(entry.image);
+    usedImages.add(entry.imageKey);
   }
 
   return result;
@@ -374,13 +411,6 @@ function isAnimalMatch(results, animal) {
   return false;
 }
 
-function getAnimalImage(animal) {
-  if (!animal) return "";
-  if (animal.image) return animal.image;
-  const variants = Array.isArray(animal.images) ? animal.images : [];
-  return variants[0] || "";
-}
-
 function initAnimalsGame() {
   progressEl = document.getElementById("animalsProgress");
   statusEl = document.getElementById("animalsStatus");
@@ -455,6 +485,25 @@ function initAnimalsGame() {
     return;
   }
 
+  currentOrientation = getOrientation();
+  const orientationQuery = window.matchMedia ? window.matchMedia(ORIENTATION_QUERY) : null;
+  const handleOrientationChange = () => {
+    const nextOrientation = getOrientation();
+    if (nextOrientation === currentOrientation) return;
+    currentOrientation = nextOrientation;
+    if (!currentAnimalEntry) return;
+    const imageNumber = currentAnimalEntry.imageNumber || 1;
+    setAnimalImageForOrientation(currentAnimalEntry, imageNumber, currentOrientation);
+  };
+
+  if (orientationQuery && typeof orientationQuery.addEventListener === "function") {
+    orientationQuery.addEventListener("change", handleOrientationChange);
+  } else if (orientationQuery && typeof orientationQuery.addListener === "function") {
+    orientationQuery.addListener(handleOrientationChange);
+  } else {
+    window.addEventListener("resize", handleOrientationChange);
+  }
+
   if (backToHomeBtn) {
     backToHomeBtn.addEventListener("click", () => {
       if (window.cordova && window.LimeTunaSpeech) {
@@ -490,6 +539,7 @@ function startNewGame() {
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
   lastAnimalCelebrationSound = {};
+  currentOrientation = getOrientation();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -549,15 +599,15 @@ function updateUIForCurrentAnimal() {
   const displayIndex = Math.min(currentIndex + 1, total);
   const sequenceAnimal = animalSequence[currentIndex];
   const fallbackAnimal = ANIMALS[0]
-    ? { ...ANIMALS[0], image: getAnimalImage(ANIMALS[0]) }
+    ? { ...ANIMALS[0], imageNumber: 1 }
     : null;
   const animal = sequenceAnimal || fallbackAnimal;
-  const imagePath = getAnimalImage(animal);
+  const imageNumber = animal && animal.imageNumber ? animal.imageNumber : 1;
+  currentAnimalEntry = animal;
+  currentOrientation = getOrientation();
 
   progressEl.textContent = `${displayIndex} / ${total}`;
-  if (imagePath) {
-    animalImageEl.src = imagePath;
-  }
+  setAnimalImageForOrientation(animal, imageNumber, currentOrientation);
   animalImageEl.alt = (animal && animal.name) || "Animal";
   feedbackEl.textContent = "";
   feedbackEl.style.color = "";
