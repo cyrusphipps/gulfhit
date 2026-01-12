@@ -312,6 +312,34 @@ body {
   object-fit: contain;
 }
 
+@media (orientation: landscape) {
+  .animals-app {
+    padding: 12px;
+  }
+
+  .animals-card {
+    max-width: 840px;
+    width: min(96vw, 840px);
+    padding: 20px;
+  }
+
+  .animal-figure {
+    flex-direction: row;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 12px;
+  }
+
+  .animal-image-frame {
+    width: clamp(220px, 45vh, 420px);
+    height: clamp(220px, 45vh, 420px);
+  }
+
+  .animals-controls {
+    margin-top: 10px;
+  }
+}
+
 .letters-current-letter {
   font-size: 10rem; /* was 5rem; now doubled for better visibility */
   font-weight: 700;
