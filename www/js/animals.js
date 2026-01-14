@@ -39,7 +39,7 @@ const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMAL_IMAGE_VARIANTS = 5;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const CORRECT_VARIANT_OVERLAP_MS = 2000;
-const ANIMALS_STATUS_PROMPT = "Say the animal when you're ready.";
+const ANIMALS_STATUS_PROMPT = "";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
   maxUtteranceMs: 11000, // allow longer utterances for this game
