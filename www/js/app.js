@@ -5,9 +5,12 @@ const LIMETUNA_GAMES = [
   { id: "colors", name: "Colors", icon: "🎨" },
   { id: "shapes", name: "Shapes", icon: "🔺" },
   { id: "animals", name: "Animals", icon: "🐾" },
-  { id: "vehicles", name: "Vehicles", icon: "🚗" }
+  { id: "reset-progress", name: "Reset Progress", icon: "♻️" }
   // Comment some out if you want fewer tiles.
 ];
+
+const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
+const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
 
 let animalsTileSound = null;
 
@@ -68,6 +71,9 @@ function initLimetunaPortal() {
         } else {
           goToAnimals();
         }
+      } else if (game.id === "reset-progress") {
+        resetAnimalsProgress();
+        openResetModal();
       } else {
         // For now, keep other tiles as simple modals
         openGameModal(game, index);
@@ -83,6 +89,14 @@ function initLimetunaPortal() {
     const appNumber = index + 1;
     modalTitleEl.textContent = game.name;
     modalBodyEl.textContent = `You started App #${appNumber}: ${game.name}`;
+    modalOverlay.classList.remove("hidden");
+  }
+
+  function openResetModal() {
+    if (!modalOverlay) return;
+    modalTitleEl.textContent = "Progress reset";
+    modalBodyEl.textContent =
+      "All animal progress has been reset to level 1. Only group 1 animals are unlocked.";
     modalOverlay.classList.remove("hidden");
   }
 
@@ -104,9 +118,19 @@ function initLimetunaPortal() {
   }
 }
 
+function resetAnimalsProgress() {
+  if (!window.localStorage) return;
+  try {
+    window.localStorage.removeItem(ANIMALS_PROGRESS_STORAGE_KEY);
+    window.localStorage.removeItem(ANIMALS_UNLOCKS_STORAGE_KEY);
+  } catch (e) {
+    console.warn("Unable to reset animal progress:", e);
+  }
+}
+
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 1.6.12 portal");
+  console.log("Cordova deviceready fired, initializing Gulfhit 1.7.1 portal");
   initLimetunaPortal();
 }
 
