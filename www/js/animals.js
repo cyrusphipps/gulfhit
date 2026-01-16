@@ -2,9 +2,9 @@
 
 const ANIMALS = [
   {
-    name: "Dog",
-    base: "dog",
-    keywords: ["dog", "puppy"]
+    name: "Bird",
+    base: "bird",
+    keywords: ["bird", "parrot"]
   },
   {
     name: "Cat",
@@ -12,19 +12,14 @@ const ANIMALS = [
     keywords: ["cat", "kitten"]
   },
   {
+    name: "Dog",
+    base: "dog",
+    keywords: ["dog", "puppy"]
+  },
+  {
     name: "Fish",
     base: "fish",
     keywords: ["fish"]
-  },
-  {
-    name: "Bird",
-    base: "bird",
-    keywords: ["bird", "parrot"]
-  },
-  {
-    name: "Spider",
-    base: "spider",
-    keywords: ["spider"]
   },
   {
     name: "Horse",
