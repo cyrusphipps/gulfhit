@@ -13,6 +13,14 @@ const {
   getAnimalGroupIndex = () => -1
 } = AnimalsData;
 
+const FALLBACK_ANIMALS = [
+  { name: "Dog" },
+  { name: "Cat" },
+  { name: "Bird" },
+  { name: "Fish" },
+  { name: "Horse" }
+];
+
 function buildProgressRows() {
   const progress = loadAnimalProgress();
   let unlockedKeys = loadUnlockedAnimals();
@@ -24,6 +32,9 @@ function buildProgressRows() {
   let unlockedAnimals = getUnlockedAnimalsForGame(unlockedKeys);
   if ((!unlockedAnimals || !unlockedAnimals.length) && ANIMAL_GROUPS.length) {
     unlockedAnimals = ANIMAL_GROUPS[0];
+  }
+  if ((!unlockedAnimals || !unlockedAnimals.length) && FALLBACK_ANIMALS.length) {
+    unlockedAnimals = FALLBACK_ANIMALS;
   }
 
   return (unlockedAnimals || []).map((animal) => {
