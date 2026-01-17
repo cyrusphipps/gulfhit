@@ -38,7 +38,7 @@ const ANIMAL_GROUPS = [
 const ANIMAL_IMAGE_VARIANTS = 5;
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
-const ANIMALS = ANIMAL_GROUPS.flat();
+const ANIMALS = ANIMAL_GROUPS.reduce((acc, group) => acc.concat(group), []);
 
 function getAnimalKey(animal) {
   return (animal && (animal.base || animal.name) ? animal.base || animal.name : "")
