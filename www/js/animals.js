@@ -69,7 +69,7 @@ let currentAnimalEntry = null;
 let animalProgress = {};
 let unlockedAnimalKeys = [];
 
-const audioCache = new Map();
+const audioCache = {};
 const ORIENTATION_QUERY = "(orientation: landscape)";
 
 function getOrientation() {
@@ -123,23 +123,24 @@ function shuffleArray(arr) {
 }
 
 function buildAnimalSequence(availableAnimals) {
-  const animalCounts = new Map();
+  const animalCounts = {};
   const result = [];
   const recentNames = [];
 
   while (result.length < TOTAL_ROUNDS) {
     const availablePool = (availableAnimals || []).filter(
-      (animal) => (animalCounts.get(animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
+      (animal) => (animalCounts[String(animal.name || "")] || 0) < MAX_ANIMAL_OCCURRENCES
     );
     if (!availablePool.length) break;
 
     const withoutRecent = availablePool.filter((animal) => !recentNames.includes(animal.name));
     const shuffledPool = shuffleArray(withoutRecent.length ? withoutRecent : availablePool);
     const selected = shuffledPool[0];
+    const selectedName = String(selected.name || "");
     result.push({
       ...selected
     });
-    animalCounts.set(selected.name, (animalCounts.get(selected.name) || 0) + 1);
+    animalCounts[selectedName] = (animalCounts[selectedName] || 0) + 1;
     recentNames.push(selected.name);
     if (recentNames.length > 2) {
       recentNames.shift();
@@ -158,13 +159,14 @@ function getAudioElement(source) {
     return source;
   }
 
-  if (audioCache.has(source)) return audioCache.get(source);
+  const cacheKey = String(source);
+  if (Object.prototype.hasOwnProperty.call(audioCache, cacheKey)) return audioCache[cacheKey];
 
   const audio = new Audio(source);
   audio.preload = "auto";
   audio.muted = false;
   audio.volume = 1.0;
-  audioCache.set(source, audio);
+  audioCache[cacheKey] = audio;
   return audio;
 }
 
