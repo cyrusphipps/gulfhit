@@ -102,7 +102,11 @@ function saveUnlockedAnimals(unlocks) {
 }
 
 function ensureUnlockedFromProgress(progress, unlocks) {
-  const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  const nextUnlocks = {};
+  (unlocks || []).forEach((key) => {
+    const normalized = String(key).toLowerCase();
+    nextUnlocks[normalized] = true;
+  });
 
   ANIMAL_GROUPS.forEach((group, index) => {
     const nextGroup = ANIMAL_GROUPS[index + 1];
@@ -110,20 +114,26 @@ function ensureUnlockedFromProgress(progress, unlocks) {
 
     const masteredCount = group.filter((animal) => getProgressForAnimal(progress, animal) >= ANIMAL_IMAGE_VARIANTS)
       .length;
-    const currentUnlockedCount = nextGroup.filter((animal) => nextUnlocks.has(getAnimalKey(animal))).length;
+    const currentUnlockedCount = nextGroup.filter((animal) => nextUnlocks[getAnimalKey(animal)]).length;
     const targetUnlockCount = Math.min(masteredCount, nextGroup.length);
     if (currentUnlockedCount >= targetUnlockCount) return;
 
     const needed = targetUnlockCount - currentUnlockedCount;
-    const toUnlock = nextGroup.filter((animal) => !nextUnlocks.has(getAnimalKey(animal))).slice(0, needed);
-    toUnlock.forEach((animal) => nextUnlocks.add(getAnimalKey(animal)));
+    const toUnlock = nextGroup.filter((animal) => !nextUnlocks[getAnimalKey(animal)]).slice(0, needed);
+    toUnlock.forEach((animal) => {
+      nextUnlocks[getAnimalKey(animal)] = true;
+    });
   });
 
-  return Array.from(nextUnlocks);
+  return Object.keys(nextUnlocks);
 }
 
 function getUnlockedAnimalsForGame(unlocks) {
-  const unlockedKeys = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  const unlockedKeys = {};
+  (unlocks || []).forEach((key) => {
+    const normalized = String(key).toLowerCase();
+    unlockedKeys[normalized] = true;
+  });
   const unlockedAnimals = [];
 
   ANIMAL_GROUPS.forEach((group, index) => {
@@ -133,7 +143,7 @@ function getUnlockedAnimalsForGame(unlocks) {
     }
 
     group.forEach((animal) => {
-      if (unlockedKeys.has(getAnimalKey(animal))) {
+      if (unlockedKeys[getAnimalKey(animal)]) {
         unlockedAnimals.push(animal);
       }
     });
