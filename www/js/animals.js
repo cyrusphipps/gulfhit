@@ -259,11 +259,8 @@ function buildAnimalSequence(availableAnimals, progress) {
     const preferred = availablePool.filter((animal) => animal.name !== lastAnimalName);
     const shuffledPool = shuffleArray(preferred.length ? preferred : availablePool);
     const selected = shuffledPool[0];
-    const imageNumber = getImageNumberForAnimal(selected, progress);
-
     result.push({
-      ...selected,
-      imageNumber
+      ...selected
     });
     animalCounts.set(selected.name, (animalCounts.get(selected.name) || 0) + 1);
     lastAnimalName = selected.name;
@@ -712,8 +709,8 @@ function updateUIForCurrentAnimal() {
     ? { ...ANIMALS[0], imageNumber: 1 }
     : null;
   const animal = sequenceAnimal || fallbackAnimal;
-  const imageNumber = animal && animal.imageNumber ? animal.imageNumber : 1;
-  currentAnimalEntry = animal;
+  const imageNumber = getImageNumberForAnimal(animal, animalProgress);
+  currentAnimalEntry = animal ? { ...animal, imageNumber } : animal;
   currentOrientation = getOrientation();
 
   progressEl.textContent = `${displayIndex} / ${total}`;
