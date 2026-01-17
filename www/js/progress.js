@@ -2,39 +2,39 @@ const AnimalsData = window.AnimalsData || {};
 const {
   ANIMAL_GROUPS = [],
   ANIMAL_IMAGE_VARIANTS = 5,
-  getAnimalKey = () => "",
+  ANIMALS_PROGRESS_STORAGE_KEY = "",
+  ANIMALS_UNLOCKS_STORAGE_KEY = "",
   getProgressForAnimal = () => 1,
   loadAnimalProgress = () => ({}),
   loadUnlockedAnimals = () => [],
-  ensureUnlockedFromProgress = (progress, unlocks) => unlocks || []
+  saveUnlockedAnimals = () => {},
+  ensureUnlockedFromProgress = (progress, unlocks) => unlocks || [],
+  getUnlockedAnimalsForGame = () => [],
+  getAnimalGroupIndex = () => -1
 } = AnimalsData;
 
 function buildProgressRows() {
   const progress = loadAnimalProgress();
-  const unlockedKeys = ensureUnlockedFromProgress(progress, loadUnlockedAnimals());
-  const unlockedSet = new Set((unlockedKeys || []).map((key) => String(key).toLowerCase()));
+  let unlockedKeys = loadUnlockedAnimals();
+  unlockedKeys = ensureUnlockedFromProgress(progress, unlockedKeys);
+  if (typeof saveUnlockedAnimals === "function") {
+    saveUnlockedAnimals(unlockedKeys);
+  }
 
-  const rows = [];
+  let unlockedAnimals = getUnlockedAnimalsForGame(unlockedKeys);
+  if ((!unlockedAnimals || !unlockedAnimals.length) && ANIMAL_GROUPS.length) {
+    unlockedAnimals = ANIMAL_GROUPS[0];
+  }
 
-  ANIMAL_GROUPS.forEach((group, groupIndex) => {
-    const unlockedAnimals = group.filter((animal, index) => {
-      if (groupIndex === 0) return true;
-      return unlockedSet.has(getAnimalKey(animal));
-    });
-
-    if (!unlockedAnimals.length) return;
-
-    unlockedAnimals.forEach((animal) => {
-      const level = getProgressForAnimal(progress, animal);
-      rows.push({
-        name: animal.name,
-        level,
-        group: groupIndex + 1
-      });
-    });
+  return (unlockedAnimals || []).map((animal) => {
+    const level = getProgressForAnimal(progress, animal);
+    const groupIndex = typeof getAnimalGroupIndex === "function" ? getAnimalGroupIndex(animal) : -1;
+    return {
+      name: animal.name,
+      level,
+      group: groupIndex >= 0 ? groupIndex + 1 : 1
+    };
   });
-
-  return rows;
 }
 
 function renderProgress() {
@@ -105,6 +105,26 @@ function initProgressPage() {
   }
 
   renderProgress();
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (event) => {
+      if (!event) return;
+      if (
+        event.key === ANIMALS_PROGRESS_STORAGE_KEY ||
+        event.key === ANIMALS_UNLOCKS_STORAGE_KEY
+      ) {
+        renderProgress();
+      }
+    });
+  }
+
+  if (typeof document !== "undefined") {
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) {
+        renderProgress();
+      }
+    });
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {
