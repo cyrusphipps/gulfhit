@@ -69,7 +69,7 @@ let currentAnimalEntry = null;
 let animalProgress = {};
 let unlockedAnimalKeys = [];
 
-const audioCache = {};
+const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
 
 function getOrientation() {
@@ -123,24 +123,23 @@ function shuffleArray(arr) {
 }
 
 function buildAnimalSequence(availableAnimals) {
-  const animalCounts = {};
+  const animalCounts = new Map();
   const result = [];
   const recentNames = [];
 
   while (result.length < TOTAL_ROUNDS) {
     const availablePool = (availableAnimals || []).filter(
-      (animal) => (animalCounts[String(animal.name || "")] || 0) < MAX_ANIMAL_OCCURRENCES
+      (animal) => (animalCounts.get(animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
     );
     if (!availablePool.length) break;
 
     const withoutRecent = availablePool.filter((animal) => !recentNames.includes(animal.name));
     const shuffledPool = shuffleArray(withoutRecent.length ? withoutRecent : availablePool);
     const selected = shuffledPool[0];
-    const selectedName = String(selected.name || "");
     result.push({
       ...selected
     });
-    animalCounts[selectedName] = (animalCounts[selectedName] || 0) + 1;
+    animalCounts.set(selected.name, (animalCounts.get(selected.name) || 0) + 1);
     recentNames.push(selected.name);
     if (recentNames.length > 2) {
       recentNames.shift();
@@ -159,14 +158,13 @@ function getAudioElement(source) {
     return source;
   }
 
-  const cacheKey = String(source);
-  if (Object.prototype.hasOwnProperty.call(audioCache, cacheKey)) return audioCache[cacheKey];
+  if (audioCache.has(source)) return audioCache.get(source);
 
   const audio = new Audio(source);
   audio.preload = "auto";
   audio.muted = false;
   audio.volume = 1.0;
-  audioCache[cacheKey] = audio;
+  audioCache.set(source, audio);
   return audio;
 }
 
@@ -443,22 +441,6 @@ function initAnimalsGame() {
     animalEffectEls[key] = getAudioElement(`audio/animals/${base}_e.wav`);
   });
 
-  const celebrationSounds = [];
-  for (const key in animalCelebrationEls) {
-    if (!Object.prototype.hasOwnProperty.call(animalCelebrationEls, key)) continue;
-    const sounds = animalCelebrationEls[key];
-    if (!Array.isArray(sounds)) continue;
-    for (let i = 0; i < sounds.length; i++) {
-      celebrationSounds.push(sounds[i]);
-    }
-  }
-
-  const effectSounds = [];
-  for (const key in animalEffectEls) {
-    if (!Object.prototype.hasOwnProperty.call(animalEffectEls, key)) continue;
-    effectSounds.push(animalEffectEls[key]);
-  }
-
   primeAudioElements([
     soundCorrectEl,
     soundWrongEl,
@@ -469,8 +451,8 @@ function initAnimalsGame() {
     ...soundOneMoreTimeEls,
     ...soundPreQuestionRootEls,
     ...soundPreQuestionAnimalEls,
-    ...celebrationSounds,
-    ...effectSounds
+    ...Object.values(animalCelebrationEls).flat(),
+    ...Object.values(animalEffectEls)
   ]);
 
   [soundCorrectEl, soundWrongEl, soundWinEl, soundLoseEl].forEach((el) => {
@@ -532,10 +514,7 @@ function startNewGame() {
   unlockedAnimalKeys = loadUnlockedAnimals();
   unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
   saveUnlockedAnimals(unlockedAnimalKeys);
-  let availableAnimals = getUnlockedAnimalsForGame(unlockedAnimalKeys);
-  if (!Array.isArray(availableAnimals) || !availableAnimals.length) {
-    availableAnimals = ANIMALS.slice();
-  }
+  const availableAnimals = getUnlockedAnimalsForGame(unlockedAnimalKeys);
   animalSequence = buildAnimalSequence(availableAnimals);
   currentIndex = 0;
   correctCount = 0;

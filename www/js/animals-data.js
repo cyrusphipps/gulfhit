@@ -38,7 +38,7 @@ const ANIMAL_GROUPS = [
 const ANIMAL_IMAGE_VARIANTS = 5;
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
-const ANIMALS = ANIMAL_GROUPS.reduce((acc, group) => acc.concat(group), []);
+const ANIMALS = ANIMAL_GROUPS.flat();
 
 function getAnimalKey(animal) {
   return (animal && (animal.base || animal.name) ? animal.base || animal.name : "")
@@ -102,11 +102,7 @@ function saveUnlockedAnimals(unlocks) {
 }
 
 function ensureUnlockedFromProgress(progress, unlocks) {
-  const nextUnlocks = {};
-  (unlocks || []).forEach((key) => {
-    const normalized = String(key).toLowerCase();
-    nextUnlocks[normalized] = true;
-  });
+  const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
 
   ANIMAL_GROUPS.forEach((group, index) => {
     const nextGroup = ANIMAL_GROUPS[index + 1];
@@ -114,26 +110,20 @@ function ensureUnlockedFromProgress(progress, unlocks) {
 
     const masteredCount = group.filter((animal) => getProgressForAnimal(progress, animal) >= ANIMAL_IMAGE_VARIANTS)
       .length;
-    const currentUnlockedCount = nextGroup.filter((animal) => nextUnlocks[getAnimalKey(animal)]).length;
+    const currentUnlockedCount = nextGroup.filter((animal) => nextUnlocks.has(getAnimalKey(animal))).length;
     const targetUnlockCount = Math.min(masteredCount, nextGroup.length);
     if (currentUnlockedCount >= targetUnlockCount) return;
 
     const needed = targetUnlockCount - currentUnlockedCount;
-    const toUnlock = nextGroup.filter((animal) => !nextUnlocks[getAnimalKey(animal)]).slice(0, needed);
-    toUnlock.forEach((animal) => {
-      nextUnlocks[getAnimalKey(animal)] = true;
-    });
+    const toUnlock = nextGroup.filter((animal) => !nextUnlocks.has(getAnimalKey(animal))).slice(0, needed);
+    toUnlock.forEach((animal) => nextUnlocks.add(getAnimalKey(animal)));
   });
 
-  return Object.keys(nextUnlocks);
+  return Array.from(nextUnlocks);
 }
 
 function getUnlockedAnimalsForGame(unlocks) {
-  const unlockedKeys = {};
-  (unlocks || []).forEach((key) => {
-    const normalized = String(key).toLowerCase();
-    unlockedKeys[normalized] = true;
-  });
+  const unlockedKeys = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
   const unlockedAnimals = [];
 
   ANIMAL_GROUPS.forEach((group, index) => {
@@ -143,7 +133,7 @@ function getUnlockedAnimalsForGame(unlocks) {
     }
 
     group.forEach((animal) => {
-      if (unlockedKeys[getAnimalKey(animal)]) {
+      if (unlockedKeys.has(getAnimalKey(animal))) {
         unlockedAnimals.push(animal);
       }
     });
