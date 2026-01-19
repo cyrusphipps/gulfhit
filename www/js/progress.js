@@ -1,19 +1,19 @@
 const AnimalsData = window.AnimalsData || {};
 const {
   ANIMAL_GROUPS = [],
-  ANIMAL_IMAGE_VARIANTS = 5,
+  MASTERED_THRESHOLD = 3,
   getAnimalKey = () => "",
-  getProgressForAnimal = () => 1,
-  loadAnimalProgress = () => ({}),
-  loadUnlockedAnimals = () => [],
-  ensureUnlockedFromProgress = (progress, unlocks) => unlocks || []
+  getProgressForAnimal = () => ({ correctCount: 0, mastered: false, unlocked: false }),
+  loadAnimalProgress = async () => ({}),
+  getUnlockedAnimalsForGame = () => [],
+  initAnimalsStorage = async () => null
 } = AnimalsData;
 
-function buildProgressRows() {
-  const progress = loadAnimalProgress();
-  const unlockedKeys = ensureUnlockedFromProgress(progress, loadUnlockedAnimals());
-  const unlockedSet = new Set((unlockedKeys || []).map((key) => String(key).toLowerCase()));
-
+async function buildProgressRows() {
+  await initAnimalsStorage();
+  const progress = await loadAnimalProgress();
+  const unlockedAnimals = getUnlockedAnimalsForGame(progress);
+  const unlockedSet = new Set(unlockedAnimals.map((animal) => getAnimalKey(animal)));
   const rows = [];
 
   ANIMAL_GROUPS.forEach((group, groupIndex) => {
@@ -25,10 +25,11 @@ function buildProgressRows() {
     if (!unlockedAnimals.length) return;
 
     unlockedAnimals.forEach((animal) => {
-      const level = getProgressForAnimal(progress, animal);
+      const entry = getProgressForAnimal(progress, animal);
       rows.push({
         name: animal.name,
-        level,
+        correctCount: entry.correctCount || 0,
+        mastered: entry.mastered,
         group: groupIndex + 1
       });
     });
@@ -37,14 +38,14 @@ function buildProgressRows() {
   return rows;
 }
 
-function renderProgress() {
+async function renderProgress() {
   const listEl = document.getElementById("progressList");
   const emptyEl = document.getElementById("progressEmpty");
   const summaryEl = document.getElementById("progressSummary");
 
   if (!listEl || !emptyEl || !summaryEl) return;
 
-  const rows = buildProgressRows();
+  const rows = await buildProgressRows();
   listEl.innerHTML = "";
 
   if (!rows.length) {
@@ -85,7 +86,9 @@ function renderProgress() {
 
         const levelEl = document.createElement("div");
         levelEl.className = "progress-item-level";
-        levelEl.textContent = `Level ${row.level} / ${ANIMAL_IMAGE_VARIANTS}`;
+        levelEl.textContent = row.mastered
+          ? "Mastered ✓"
+          : `Correct ${row.correctCount} / ${MASTERED_THRESHOLD}`;
 
         item.appendChild(nameEl);
         item.appendChild(levelEl);
@@ -104,7 +107,7 @@ function initProgressPage() {
     });
   }
 
-  renderProgress();
+  renderProgress().catch((e) => console.error("Unable to render progress:", e));
 }
 
 document.addEventListener("DOMContentLoaded", () => {
