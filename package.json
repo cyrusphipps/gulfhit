@@ -1,7 +1,6 @@
 {
   "devDependencies": {
     "cordova-android": "^14.0.1",
-    "cordova-sqlcipher-adapter": "0.6.1",
     "limetuna-speech": "file:plugins-src/limetuna.speech"
   },
   "cordova": {
@@ -9,7 +8,6 @@
       "android"
     ],
     "plugins": {
-      "cordova-sqlcipher-adapter": {},
       "limetuna.speech": {}
     }
   }

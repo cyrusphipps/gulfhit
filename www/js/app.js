@@ -9,11 +9,10 @@ const LIMETUNA_GAMES = [
   // Comment some out if you want fewer tiles.
 ];
 
-const AnimalsData = window.AnimalsData || {};
-const { resetAnimalProgress = async () => {} } = AnimalsData;
+const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
+const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
 
 let animalsTileSound = null;
-let portalInitialized = false;
 
 function initLimetunaPortal() {
   const gridEl = document.getElementById("tilesGrid");
@@ -23,7 +22,7 @@ function initLimetunaPortal() {
   const modalCloseBtn = document.getElementById("modalCloseBtn");
 
   if (!gridEl) {
-    console.error("tilesGrid element not found; tiles cannot be rendered");
+    console.error("tilesGrid element not found");
     return;
   }
 
@@ -73,9 +72,8 @@ function initLimetunaPortal() {
           goToAnimals();
         }
       } else if (game.id === "reset-progress") {
-        resetAnimalsProgress()
-          .then(openResetModal)
-          .catch((e) => console.error("Failed to reset animal progress:", e));
+        resetAnimalsProgress();
+        openResetModal();
       } else {
         // For now, keep other tiles as simple modals
         openGameModal(game, index);
@@ -98,7 +96,7 @@ function initLimetunaPortal() {
     if (!modalOverlay) return;
     modalTitleEl.textContent = "Progress reset";
     modalBodyEl.textContent =
-      "All animal progress has been reset. Only group 1 animals are unlocked.";
+      "All animal progress has been reset to level 1. Only group 1 animals are unlocked.";
     modalOverlay.classList.remove("hidden");
   }
 
@@ -120,17 +118,19 @@ function initLimetunaPortal() {
   }
 }
 
-async function resetAnimalsProgress() {
-  await resetAnimalProgress();
+function resetAnimalsProgress() {
+  if (!window.localStorage) return;
+  try {
+    window.localStorage.removeItem(ANIMALS_PROGRESS_STORAGE_KEY);
+    window.localStorage.removeItem(ANIMALS_UNLOCKS_STORAGE_KEY);
+  } catch (e) {
+    console.warn("Unable to reset animal progress:", e);
+  }
 }
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  if (portalInitialized) return;
-  portalInitialized = true;
-  console.log(
-    "Cordova deviceready fired, initializing Gulfhit 1.9.3 portal"
-  );
+  console.log("Cordova deviceready fired, initializing Gulfhit 1.7.2 portal");
   initLimetunaPortal();
 }
 
@@ -160,20 +160,8 @@ document.addEventListener("DOMContentLoaded", function () {
 // Support running in browser without Cordova for quick testing
 if (window.cordova) {
   document.addEventListener("deviceready", onDeviceReady, false);
-  document.addEventListener("DOMContentLoaded", () => {
-    setTimeout(() => {
-      if (portalInitialized) return;
-      portalInitialized = true;
-      console.warn(
-        "Cordova deviceready did not fire in time; initializing portal on DOMContentLoaded fallback"
-      );
-      initLimetunaPortal();
-    }, 2500);
-  });
 } else {
   document.addEventListener("DOMContentLoaded", () => {
-    if (portalInitialized) return;
-    portalInitialized = true;
     console.log("No Cordova detected, running in browser mode");
     initLimetunaPortal();
   });

@@ -1,19 +1,46 @@
 // animals.js – simple speech game modeled after Letters
 
-const AnimalsData = window.AnimalsData || {};
-const {
-  ANIMAL_IMAGE_VARIANTS = 5,
-  ANIMALS = [],
-  getAnimalKey = () => "",
-  getUnlockedAnimalsForGame = () => [],
-  loadAnimalProgress = async () => ({}),
-  recordCorrectAnswer = async () => ({ progress: {}, unlockedKey: null, masteredNow: false }),
-  initAnimalsStorage = async () => null
-} = AnimalsData;
+const ANIMAL_GROUPS = [
+  [
+    {
+      name: "Bird",
+      base: "bird",
+      keywords: ["bird", "parrot"]
+    },
+    {
+      name: "Cat",
+      base: "cat",
+      keywords: ["cat", "kitten"]
+    },
+    {
+      name: "Dog",
+      base: "dog",
+      keywords: ["dog", "puppy"]
+    },
+    {
+      name: "Fish",
+      base: "fish",
+      keywords: ["fish"]
+    },
+    {
+      name: "Horse",
+      base: "horse",
+      keywords: ["horse", "pony"]
+    }
+  ],
+  [
+    {
+      name: "Spider",
+      base: "spider",
+      keywords: ["spider"]
+    }
+  ]
+];
 
 const TOTAL_ROUNDS = 10;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
+const ANIMAL_IMAGE_VARIANTS = 5;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const CORRECT_VARIANT_OVERLAP_MS = 2000;
 const ANIMALS_STATUS_PROMPT = "";
@@ -24,6 +51,10 @@ const ANIMALS_SPEECH_OPTIONS = {
   postSilenceMs: 10000,
   minPostSilenceMs: 10000
 };
+
+const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
+const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
+const ANIMALS = ANIMAL_GROUPS.flat();
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -61,6 +92,7 @@ let lastAnimalCelebrationSound = {};
 let currentOrientation = "portrait";
 let currentAnimalEntry = null;
 let animalProgress = {};
+let unlockedAnimalKeys = [];
 
 const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
@@ -84,9 +116,114 @@ function getAnimalImagePath(animal, imageNumber, orientation) {
   return `img/animals/${base}_${suffix}${variant}.webp`;
 }
 
+function getAnimalKey(animal) {
+  return (animal && (animal.base || animal.name) ? animal.base || animal.name : "")
+    .toLowerCase()
+    .trim();
+}
+
+function getProgressForAnimal(progressMap, animal) {
+  const key = getAnimalKey(animal);
+  const raw = progressMap && Object.prototype.hasOwnProperty.call(progressMap, key) ? progressMap[key] : 1;
+  const level = Number(raw);
+  if (!Number.isFinite(level) || level < 1) return 1;
+  if (level > ANIMAL_IMAGE_VARIANTS) return ANIMAL_IMAGE_VARIANTS;
+  return level;
+}
+
 function getImageNumberForAnimal(animal, progressMap) {
-  if (!animal) return 1;
-  return Math.floor(Math.random() * ANIMAL_IMAGE_VARIANTS) + 1;
+  const level = getProgressForAnimal(progressMap, animal);
+  if (level >= ANIMAL_IMAGE_VARIANTS) {
+    return Math.floor(Math.random() * ANIMAL_IMAGE_VARIANTS) + 1;
+  }
+  return level;
+}
+
+function loadStoredJson(key, fallback) {
+  if (typeof window === "undefined" || !window.localStorage) return fallback;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed || fallback;
+  } catch (e) {
+    console.warn("Storage load failed:", e);
+    return fallback;
+  }
+}
+
+function saveStoredJson(key, value) {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    console.warn("Storage save failed:", e);
+  }
+}
+
+function loadAnimalProgress() {
+  const stored = loadStoredJson(ANIMALS_PROGRESS_STORAGE_KEY, {});
+  const normalized = {};
+  ANIMALS.forEach((animal) => {
+    const key = getAnimalKey(animal);
+    normalized[key] = getProgressForAnimal(stored, animal);
+  });
+  return normalized;
+}
+
+function loadUnlockedAnimals() {
+  const stored = loadStoredJson(ANIMALS_UNLOCKS_STORAGE_KEY, []);
+  if (!Array.isArray(stored)) return [];
+  return stored.map((key) => String(key).toLowerCase());
+}
+
+function saveAnimalProgress(progress) {
+  saveStoredJson(ANIMALS_PROGRESS_STORAGE_KEY, progress);
+}
+
+function saveUnlockedAnimals(unlocks) {
+  saveStoredJson(ANIMALS_UNLOCKS_STORAGE_KEY, unlocks);
+}
+
+function ensureUnlockedFromProgress(progress, unlocks) {
+  const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+
+  ANIMAL_GROUPS.forEach((group, index) => {
+    const nextGroup = ANIMAL_GROUPS[index + 1];
+    if (!nextGroup || !nextGroup.length) return;
+
+    const masteredCount = group.filter((animal) => getProgressForAnimal(progress, animal) >= ANIMAL_IMAGE_VARIANTS)
+      .length;
+    const currentUnlockedCount = nextGroup.filter((animal) => nextUnlocks.has(getAnimalKey(animal))).length;
+    const targetUnlockCount = Math.min(masteredCount, nextGroup.length);
+    if (currentUnlockedCount >= targetUnlockCount) return;
+
+    const needed = targetUnlockCount - currentUnlockedCount;
+    const toUnlock = nextGroup.filter((animal) => !nextUnlocks.has(getAnimalKey(animal))).slice(0, needed);
+    toUnlock.forEach((animal) => nextUnlocks.add(getAnimalKey(animal)));
+  });
+
+  return Array.from(nextUnlocks);
+}
+
+function getUnlockedAnimalsForGame(unlocks) {
+  const unlockedKeys = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  const unlockedAnimals = [];
+
+  ANIMAL_GROUPS.forEach((group, index) => {
+    if (index === 0) {
+      unlockedAnimals.push(...group);
+      return;
+    }
+
+    group.forEach((animal) => {
+      if (unlockedKeys.has(getAnimalKey(animal))) {
+        unlockedAnimals.push(animal);
+      }
+    });
+  });
+
+  return unlockedAnimals;
 }
 
 function setAnimalImageForOrientation(animal, imageNumber, orientation) {
@@ -485,17 +622,19 @@ function initAnimalsGame() {
 
   if (restartGameBtn) {
     restartGameBtn.addEventListener("click", () => {
-      startNewGame().catch((e) => console.error("Failed to restart game:", e));
+      startNewGame();
     });
   }
 
-  startNewGame().catch((e) => console.error("Failed to start game:", e));
+  startNewGame();
 }
 
-async function startNewGame() {
-  await initAnimalsStorage();
-  animalProgress = await loadAnimalProgress();
-  const availableAnimals = getUnlockedAnimalsForGame(animalProgress);
+function startNewGame() {
+  animalProgress = loadAnimalProgress();
+  unlockedAnimalKeys = loadUnlockedAnimals();
+  unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
+  saveUnlockedAnimals(unlockedAnimalKeys);
+  const availableAnimals = getUnlockedAnimalsForGame(unlockedAnimalKeys);
   animalSequence = buildAnimalSequence(availableAnimals, animalProgress);
   currentIndex = 0;
   correctCount = 0;
@@ -625,7 +764,7 @@ function startListeningForCurrentAnimal(options = {}) {
           statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
           if (isCorrect) {
-            handleCorrect(animal).catch((e) => console.error("Failed to handle correct answer:", e));
+            handleCorrect(animal);
           } else {
             handleIncorrect({ reason: "wrong", animal });
           }
@@ -672,14 +811,22 @@ function startListeningForCurrentAnimal(options = {}) {
   beginListening();
 }
 
-async function handleCorrect(animal) {
+function handleCorrect(animal) {
   feedbackEl.textContent = "✓ Correct!";
   feedbackEl.style.color = "#2e7d32";
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
-  const result = await recordCorrectAnswer(animal, animalProgress);
-  animalProgress = result.progress;
+  const key = getAnimalKey(animal);
+  const currentLevel = getProgressForAnimal(animalProgress, animal);
+  if (currentLevel < ANIMAL_IMAGE_VARIANTS) {
+    animalProgress[key] = currentLevel + 1;
+    saveAnimalProgress(animalProgress);
+    if (animalProgress[key] >= ANIMAL_IMAGE_VARIANTS) {
+      unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
+      saveUnlockedAnimals(unlockedAnimalKeys);
+    }
+  }
 
   const variant = chooseRandomSound(soundCorrectVariantEls);
   const celebrationPool = animalCelebrationEls[animal.name] || [];
