@@ -7,7 +7,8 @@ const {
   getAnimalKey = () => "",
   getUnlockedAnimalsForGame = () => [],
   loadAnimalProgress = async () => ({}),
-  recordCorrectAnswer = async () => ({ progress: {}, unlockedKey: null, masteredNow: false })
+  recordCorrectAnswer = async () => ({ progress: {}, unlockedKey: null, masteredNow: false }),
+  initAnimalsStorage = async () => null
 } = AnimalsData;
 
 const TOTAL_ROUNDS = 10;
@@ -492,6 +493,7 @@ function initAnimalsGame() {
 }
 
 async function startNewGame() {
+  await initAnimalsStorage();
   animalProgress = await loadAnimalProgress();
   const availableAnimals = getUnlockedAnimalsForGame(animalProgress);
   animalSequence = buildAnimalSequence(availableAnimals, animalProgress);

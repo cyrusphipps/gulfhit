@@ -5,10 +5,12 @@ const {
   getAnimalKey = () => "",
   getProgressForAnimal = () => ({ correctCount: 0, mastered: false, unlocked: false }),
   loadAnimalProgress = async () => ({}),
-  getUnlockedAnimalsForGame = () => []
+  getUnlockedAnimalsForGame = () => [],
+  initAnimalsStorage = async () => null
 } = AnimalsData;
 
 async function buildProgressRows() {
+  await initAnimalsStorage();
   const progress = await loadAnimalProgress();
   const unlockedAnimals = getUnlockedAnimalsForGame(progress);
   const unlockedSet = new Set(unlockedAnimals.map((animal) => getAnimalKey(animal)));
