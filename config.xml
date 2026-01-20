@@ -7,7 +7,7 @@
     <author email="dev@cordova.apache.org" href="https://cordova.apache.org">
         Apache Cordova Team
     </author>
-    <plugin name="cordova-sqlcipher-adapter" spec="0.6.0" />
+    <plugin name="cordova-sqlcipher-adapter" spec="0.6.1" />
     <content src="index.html" />
     <allow-intent href="http://*/*" />
     <allow-intent href="https://*/*" />
