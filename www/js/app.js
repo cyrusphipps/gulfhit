@@ -13,6 +13,7 @@ const AnimalsData = window.AnimalsData || {};
 const { resetAnimalProgress = async () => {} } = AnimalsData;
 
 let animalsTileSound = null;
+let portalInitialized = false;
 
 function initLimetunaPortal() {
   const gridEl = document.getElementById("tilesGrid");
@@ -22,7 +23,7 @@ function initLimetunaPortal() {
   const modalCloseBtn = document.getElementById("modalCloseBtn");
 
   if (!gridEl) {
-    console.error("tilesGrid element not found");
+    console.error("tilesGrid element not found; tiles cannot be rendered");
     return;
   }
 
@@ -125,7 +126,11 @@ async function resetAnimalsProgress() {
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 1.9.1 portal");
+  if (portalInitialized) return;
+  portalInitialized = true;
+  console.log(
+    "Cordova deviceready fired, initializing Gulfhit 1.9.1 portal"
+  );
   initLimetunaPortal();
 }
 
@@ -155,8 +160,20 @@ document.addEventListener("DOMContentLoaded", function () {
 // Support running in browser without Cordova for quick testing
 if (window.cordova) {
   document.addEventListener("deviceready", onDeviceReady, false);
+  document.addEventListener("DOMContentLoaded", () => {
+    setTimeout(() => {
+      if (portalInitialized) return;
+      portalInitialized = true;
+      console.warn(
+        "Cordova deviceready did not fire in time; initializing portal on DOMContentLoaded fallback"
+      );
+      initLimetunaPortal();
+    }, 2500);
+  });
 } else {
   document.addEventListener("DOMContentLoaded", () => {
+    if (portalInitialized) return;
+    portalInitialized = true;
     console.log("No Cordova detected, running in browser mode");
     initLimetunaPortal();
   });
