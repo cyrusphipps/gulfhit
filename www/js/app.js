@@ -129,7 +129,7 @@ function onDeviceReady() {
   if (portalInitialized) return;
   portalInitialized = true;
   console.log(
-    "Cordova deviceready fired, initializing Gulfhit 1.9.1 portal"
+    "Cordova deviceready fired, initializing Gulfhit 1.9.3 portal"
   );
   initLimetunaPortal();
 }
