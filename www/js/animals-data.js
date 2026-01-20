@@ -274,6 +274,7 @@ async function initAnimalsStorage() {
   return db;
 }
 
+
 function loadStoredJson(key, fallback) {
   if (typeof window === "undefined" || !window.localStorage) return fallback;
   try {
