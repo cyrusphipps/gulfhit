@@ -3,7 +3,7 @@ const LIMETUNA_GAMES = [
   { id: "letters", name: "Letters", icon: "🔤" },
   { id: "numbers", name: "Numbers", icon: "🔢" },
   { id: "colors", name: "Colors", icon: "🎨" },
-  { id: "shapes", name: "Shapes", icon: "🔺" },
+  { id: "progress", name: "Progress", icon: "📊" },
   { id: "animals", name: "Animals", icon: "🐾" },
   { id: "reset-progress", name: "Reset Progress", icon: "♻️" }
   // Comment some out if you want fewer tiles.
@@ -48,6 +48,8 @@ function initLimetunaPortal() {
 
       if (game.id === "letters") {
         window.location.href = "letters.html";
+      } else if (game.id === "progress") {
+        window.location.href = "progress.html";
       } else if (game.id === "animals") {
         const goToAnimals = () => {
           window.location.href = "animals.html";
@@ -133,7 +135,7 @@ function resetAnimalsProgress() {
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 1.9.6 portal");
+  console.log("Cordova deviceready fired, initializing Gulfhit 1.9.7 portal");
   initLimetunaPortal();
 }
 
