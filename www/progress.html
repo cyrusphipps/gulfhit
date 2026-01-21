@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gulfhit 1.9.7 · Progress</title>
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
+  />
+  <link rel="stylesheet" href="css/styles.css" />
+
+  <!-- Progress screen logic -->
+  <script src="js/progress.js" defer></script>
+</head>
+<body>
+  <div id="progressApp" class="progress-app">
+    <header class="app-header">
+      <p class="app-subtitle">Animal progress · correct answers</p>
+    </header>
+
+    <main class="progress-main">
+      <section class="progress-card">
+        <div class="progress-summary" id="progressSummary"></div>
+
+        <div class="progress-table-wrap">
+          <table class="progress-table" aria-label="Animal progress table">
+            <thead>
+              <tr>
+                <th scope="col">Animal</th>
+                <th scope="col">Correct</th>
+                <th scope="col">Level</th>
+              </tr>
+            </thead>
+            <tbody id="progressTableBody"></tbody>
+          </table>
+        </div>
+
+        <div class="progress-controls">
+          <button id="backToHomeBtn" class="btn-tertiary">
+            ← Back to games
+          </button>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
