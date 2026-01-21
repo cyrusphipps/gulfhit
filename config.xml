@@ -9,6 +9,7 @@
     </author>
     <platform name="android">
         <preference name="android-debuggable" value="false" />
+        <hook type="after_prepare" src="hooks/after_prepare/010-copy-build-extras.js" />
     </platform>
     <content src="index.html" />
     <allow-intent href="http://*/*" />
