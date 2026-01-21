@@ -54,6 +54,7 @@ const ANIMALS_SPEECH_OPTIONS = {
 
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
+const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
 const ANIMALS = ANIMAL_GROUPS.flat();
 
 let animalSequence = [];
@@ -70,6 +71,7 @@ let sttEnabled = false;
 let sttFatalError = false;
 
 let progressEl;
+let progressSummaryEl;
 let statusEl;
 let feedbackEl;
 let finalScoreEl;
@@ -93,6 +95,7 @@ let currentOrientation = "portrait";
 let currentAnimalEntry = null;
 let animalProgress = {};
 let unlockedAnimalKeys = [];
+let animalCorrectCounts = {};
 
 const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
@@ -171,6 +174,18 @@ function loadAnimalProgress() {
   return normalized;
 }
 
+function loadAnimalCorrectCounts() {
+  const stored = loadStoredJson(ANIMALS_CORRECT_COUNTS_STORAGE_KEY, {});
+  const normalized = {};
+  ANIMALS.forEach((animal) => {
+    const key = getAnimalKey(animal);
+    const raw = stored && Object.prototype.hasOwnProperty.call(stored, key) ? stored[key] : 0;
+    const count = Number(raw);
+    normalized[key] = Number.isFinite(count) && count > 0 ? count : 0;
+  });
+  return normalized;
+}
+
 function loadUnlockedAnimals() {
   const stored = loadStoredJson(ANIMALS_UNLOCKS_STORAGE_KEY, []);
   if (!Array.isArray(stored)) return [];
@@ -179,6 +194,10 @@ function loadUnlockedAnimals() {
 
 function saveAnimalProgress(progress) {
   saveStoredJson(ANIMALS_PROGRESS_STORAGE_KEY, progress);
+}
+
+function saveAnimalCorrectCounts(counts) {
+  saveStoredJson(ANIMALS_CORRECT_COUNTS_STORAGE_KEY, counts);
 }
 
 function saveUnlockedAnimals(unlocks) {
@@ -515,6 +534,7 @@ function isAnimalMatch(results, animal) {
 
 function initAnimalsGame() {
   progressEl = document.getElementById("animalsProgress");
+  progressSummaryEl = document.getElementById("animalsProgressSummary");
   statusEl = document.getElementById("animalsStatus");
   feedbackEl = document.getElementById("animalsFeedback");
   finalScoreEl = document.getElementById("finalScore");
@@ -631,6 +651,7 @@ function initAnimalsGame() {
 
 function startNewGame() {
   animalProgress = loadAnimalProgress();
+  animalCorrectCounts = loadAnimalCorrectCounts();
   unlockedAnimalKeys = loadUnlockedAnimals();
   unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
   saveUnlockedAnimals(unlockedAnimalKeys);
@@ -714,6 +735,14 @@ function updateUIForCurrentAnimal() {
   currentOrientation = getOrientation();
 
   progressEl.textContent = `${displayIndex} / ${total}`;
+  if (progressSummaryEl) {
+    const key = getAnimalKey(animal);
+    const count =
+      animalCorrectCounts && Object.prototype.hasOwnProperty.call(animalCorrectCounts, key)
+        ? animalCorrectCounts[key]
+        : 0;
+    progressSummaryEl.textContent = `Correct so far for ${animal.name}: ${count}`;
+  }
   setAnimalImageForOrientation(animal, imageNumber, currentOrientation);
   animalImageEl.alt = (animal && animal.name) || "Animal";
   feedbackEl.textContent = "";
@@ -817,6 +846,16 @@ function handleCorrect(animal) {
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
+  const correctKey = getAnimalKey(animal);
+  const currentCorrectCount =
+    animalCorrectCounts && Object.prototype.hasOwnProperty.call(animalCorrectCounts, correctKey)
+      ? animalCorrectCounts[correctKey]
+      : 0;
+  animalCorrectCounts[correctKey] = (Number.isFinite(currentCorrectCount) ? currentCorrectCount : 0) + 1;
+  saveAnimalCorrectCounts(animalCorrectCounts);
+  if (progressSummaryEl) {
+    progressSummaryEl.textContent = `Correct so far for ${animal.name}: ${animalCorrectCounts[correctKey]}`;
+  }
   const key = getAnimalKey(animal);
   const currentLevel = getProgressForAnimal(animalProgress, animal);
   if (currentLevel < ANIMAL_IMAGE_VARIANTS) {
