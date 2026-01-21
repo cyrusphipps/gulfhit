@@ -7,6 +7,9 @@
     <author email="dev@cordova.apache.org" href="https://cordova.apache.org">
         Apache Cordova Team
     </author>
+    <platform name="android">
+        <preference name="android-debuggable" value="false" />
+    </platform>
     <content src="index.html" />
     <allow-intent href="http://*/*" />
     <allow-intent href="https://*/*" />
