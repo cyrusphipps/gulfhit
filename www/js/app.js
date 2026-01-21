@@ -9,8 +9,10 @@ const LIMETUNA_GAMES = [
   // Comment some out if you want fewer tiles.
 ];
 
+// Progress metadata keys (keep in sync with resetAnimalsProgress()).
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
+const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
 
 let animalsTileSound = null;
 
@@ -96,7 +98,7 @@ function initLimetunaPortal() {
     if (!modalOverlay) return;
     modalTitleEl.textContent = "Progress reset";
     modalBodyEl.textContent =
-      "All animal progress has been reset to level 1. Only group 1 animals are unlocked.";
+      "All animal progress and counts have been reset to level 1. Only group 1 animals are unlocked.";
     modalOverlay.classList.remove("hidden");
   }
 
@@ -123,6 +125,7 @@ function resetAnimalsProgress() {
   try {
     window.localStorage.removeItem(ANIMALS_PROGRESS_STORAGE_KEY);
     window.localStorage.removeItem(ANIMALS_UNLOCKS_STORAGE_KEY);
+    window.localStorage.removeItem(ANIMALS_CORRECT_COUNTS_STORAGE_KEY);
   } catch (e) {
     console.warn("Unable to reset animal progress:", e);
   }
