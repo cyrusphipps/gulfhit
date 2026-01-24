@@ -1,10 +1,6 @@
 const ANIMAL_GROUPS = [
   [
     {
-      name: "Bird",
-      base: "bird"
-    },
-    {
       name: "Cat",
       base: "cat"
     },
@@ -13,18 +9,124 @@ const ANIMAL_GROUPS = [
       base: "dog"
     },
     {
+      name: "Bird",
+      base: "bird"
+    },
+    {
       name: "Fish",
       base: "fish"
     },
     {
       name: "Horse",
       base: "horse"
+    },
+    {
+      name: "Spider",
+      base: "spider"
     }
   ],
   [
     {
-      name: "Spider",
-      base: "spider"
+      name: "Bear",
+      base: "bear"
+    },
+    {
+      name: "Lizard",
+      base: "lizard"
+    },
+    {
+      name: "Bee",
+      base: "bee"
+    },
+    {
+      name: "Dolphin",
+      base: "dolphin"
+    },
+    {
+      name: "Frog",
+      base: "frog"
+    },
+    {
+      name: "Duck",
+      base: "duck"
+    }
+  ],
+  [
+    {
+      name: "Ladybug",
+      base: "ladybug"
+    },
+    {
+      name: "Lion",
+      base: "lion"
+    },
+    {
+      name: "Monkey",
+      base: "monkey"
+    },
+    {
+      name: "Mouse",
+      base: "mouse"
+    },
+    {
+      name: "Panda",
+      base: "panda"
+    },
+    {
+      name: "Chicken",
+      base: "chicken"
+    }
+  ],
+  [
+    {
+      name: "Cow",
+      base: "cow"
+    },
+    {
+      name: "Elephant",
+      base: "elephant"
+    },
+    {
+      name: "Orca",
+      base: "orca"
+    },
+    {
+      name: "Penguin",
+      base: "penguin"
+    },
+    {
+      name: "Shark",
+      base: "shark"
+    },
+    {
+      name: "Rabbit",
+      base: "rabbit"
+    }
+  ],
+  [
+    {
+      name: "Zebra",
+      base: "zebra"
+    },
+    {
+      name: "Goat",
+      base: "goat"
+    },
+    {
+      name: "Pig",
+      base: "pig"
+    },
+    {
+      name: "Snake",
+      base: "snake"
+    },
+    {
+      name: "Tiger",
+      base: "tiger"
+    },
+    {
+      name: "Turtle",
+      base: "turtle"
     }
   ]
 ];
@@ -33,7 +135,8 @@ const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
 const ANIMAL_IMAGE_VARIANTS = 5;
 
-const ANIMALS = ANIMAL_GROUPS.flat();
+const ACTIVE_GROUP_COUNT = 1;
+const ANIMALS = ANIMAL_GROUPS.slice(0, ACTIVE_GROUP_COUNT).flat();
 
 function getAnimalKey(animal) {
   return (animal && (animal.base || animal.name) ? animal.base || animal.name : "")
