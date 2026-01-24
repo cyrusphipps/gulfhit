@@ -3,41 +3,198 @@
 const ANIMAL_GROUPS = [
   [
     {
-      name: "Bird",
-      base: "bird",
-      keywords: ["bird", "parrot"]
-    },
-    {
       name: "Cat",
       base: "cat",
+      group: 1,
       keywords: ["cat", "kitten"]
     },
     {
       name: "Dog",
       base: "dog",
+      group: 1,
       keywords: ["dog", "puppy"]
+    },
+    {
+      name: "Bird",
+      base: "bird",
+      group: 1,
+      keywords: ["bird", "parrot"]
     },
     {
       name: "Fish",
       base: "fish",
+      group: 1,
       keywords: ["fish"]
     },
     {
       name: "Horse",
       base: "horse",
+      group: 1,
       keywords: ["horse", "pony"]
+    },
+    {
+      name: "Spider",
+      base: "spider",
+      group: 1,
+      keywords: ["spider"]
     }
   ],
   [
     {
-      name: "Spider",
-      base: "spider",
-      keywords: ["spider"]
+      name: "Bear",
+      base: "bear",
+      group: 2,
+      keywords: ["bear"]
+    },
+    {
+      name: "Lizard",
+      base: "lizard",
+      group: 2,
+      keywords: ["lizard"]
+    },
+    {
+      name: "Bee",
+      base: "bee",
+      group: 2,
+      keywords: ["bee"]
+    },
+    {
+      name: "Dolphin",
+      base: "dolphin",
+      group: 2,
+      keywords: ["dolphin"]
+    },
+    {
+      name: "Frog",
+      base: "frog",
+      group: 2,
+      keywords: ["frog"]
+    },
+    {
+      name: "Duck",
+      base: "duck",
+      group: 2,
+      keywords: ["duck"]
+    }
+  ],
+  [
+    {
+      name: "Ladybug",
+      base: "ladybug",
+      group: 3,
+      keywords: ["ladybug", "lady bug"]
+    },
+    {
+      name: "Lion",
+      base: "lion",
+      group: 3,
+      keywords: ["lion"]
+    },
+    {
+      name: "Monkey",
+      base: "monkey",
+      group: 3,
+      keywords: ["monkey"]
+    },
+    {
+      name: "Mouse",
+      base: "mouse",
+      group: 3,
+      keywords: ["mouse"]
+    },
+    {
+      name: "Panda",
+      base: "panda",
+      group: 3,
+      keywords: ["panda"]
+    },
+    {
+      name: "Chicken",
+      base: "chicken",
+      group: 3,
+      keywords: ["chicken"]
+    }
+  ],
+  [
+    {
+      name: "Cow",
+      base: "cow",
+      group: 4,
+      keywords: ["cow"]
+    },
+    {
+      name: "Elephant",
+      base: "elephant",
+      group: 4,
+      keywords: ["elephant"]
+    },
+    {
+      name: "Orca",
+      base: "orca",
+      group: 4,
+      keywords: ["orca", "killer whale"]
+    },
+    {
+      name: "Penguin",
+      base: "penguin",
+      group: 4,
+      keywords: ["penguin"]
+    },
+    {
+      name: "Shark",
+      base: "shark",
+      group: 4,
+      keywords: ["shark"]
+    },
+    {
+      name: "Rabbit",
+      base: "rabbit",
+      group: 4,
+      keywords: ["rabbit", "bunny"]
+    }
+  ],
+  [
+    {
+      name: "Zebra",
+      base: "zebra",
+      group: 5,
+      keywords: ["zebra"]
+    },
+    {
+      name: "Goat",
+      base: "goat",
+      group: 5,
+      keywords: ["goat"]
+    },
+    {
+      name: "Pig",
+      base: "pig",
+      group: 5,
+      keywords: ["pig"]
+    },
+    {
+      name: "Snake",
+      base: "snake",
+      group: 5,
+      keywords: ["snake"]
+    },
+    {
+      name: "Tiger",
+      base: "tiger",
+      group: 5,
+      keywords: ["tiger"]
+    },
+    {
+      name: "Turtle",
+      base: "turtle",
+      group: 5,
+      keywords: ["turtle"]
     }
   ]
 ];
 
-const TOTAL_ROUNDS = 10;
+const ACTIVE_GROUP_COUNT = 1;
+const TOTAL_ROUNDS = 6;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMAL_IMAGE_VARIANTS = 5;
@@ -55,7 +212,8 @@ const ANIMALS_SPEECH_OPTIONS = {
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
 const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
-const ANIMALS = ANIMAL_GROUPS.flat();
+const ACTIVE_GROUPS = ANIMAL_GROUPS.slice(0, ACTIVE_GROUP_COUNT);
+const ANIMALS = ACTIVE_GROUPS.flat();
 
 let animalSequence = [];
 let currentIndex = 0;
@@ -114,9 +272,11 @@ function getAnimalImagePath(animal, imageNumber, orientation) {
   if (!animal) return "";
   const base = (animal.base || animal.name || "").toLowerCase();
   if (!base) return "";
+  const group = Number.isFinite(animal.group) ? animal.group : 1;
+  const groupPrefix = `g${group}`;
   const variant = Number.isFinite(imageNumber) ? imageNumber : 1;
   const suffix = orientation === "landscape" ? "l" : "p";
-  return `img/animals/${base}_${suffix}${variant}.webp`;
+  return `img/animals/${groupPrefix}_${base}_${suffix}${variant}.webp`;
 }
 
 function getAnimalKey(animal) {
@@ -230,6 +390,7 @@ function getUnlockedAnimalsForGame(unlocks) {
   const unlockedAnimals = [];
 
   ANIMAL_GROUPS.forEach((group, index) => {
+    if (index >= ACTIVE_GROUP_COUNT) return;
     if (index === 0) {
       unlockedAnimals.push(...group);
       return;
@@ -978,7 +1139,8 @@ function endGame() {
     // We keep beeps muted until user leaves with the back button
   }
 
-  if (correctCount >= 8) {
+  const winThreshold = Math.ceil(TOTAL_ROUNDS * 0.8);
+  if (correctCount >= winThreshold) {
     playSound(soundWinEl);
   } else {
     playSound(soundLoseEl);
