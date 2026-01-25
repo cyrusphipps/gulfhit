@@ -196,7 +196,6 @@ const ANIMAL_GROUPS = [
 const ACTIVE_GROUP_COUNT = 1;
 const TOTAL_ROUNDS = 6;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
-const MAX_ANIMAL_OCCURRENCES = 2;
 const ANIMAL_IMAGE_VARIANTS = 5;
 const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
 const CORRECT_VARIANT_OVERLAP_MS = 2000;
@@ -254,6 +253,7 @@ let currentAnimalEntry = null;
 let animalProgress = {};
 let unlockedAnimalKeys = [];
 let animalCorrectCounts = {};
+let unlockedThisGame = false;
 
 const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
@@ -366,21 +366,29 @@ function saveUnlockedAnimals(unlocks) {
 
 function ensureUnlockedFromProgress(progress, unlocks) {
   const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  const validKeys = new Set(
+    ANIMAL_GROUPS.flat().map((animal) => getAnimalKey(animal)).filter((key) => key)
+  );
+  return Array.from(nextUnlocks).filter((key) => validKeys.has(key));
+}
 
-  ANIMAL_GROUPS.forEach((group, index) => {
-    const nextGroup = ANIMAL_GROUPS[index + 1];
-    if (!nextGroup || !nextGroup.length) return;
+function unlockOneAnimalAbove(animal, unlocks) {
+  const currentGroupIndex = ANIMAL_GROUPS.findIndex((group) =>
+    group.some((entry) => getAnimalKey(entry) === getAnimalKey(animal))
+  );
+  if (currentGroupIndex === -1) return unlocks;
 
-    const masteredCount = group.filter((animal) => getProgressForAnimal(progress, animal) >= ANIMAL_IMAGE_VARIANTS)
-      .length;
-    const currentUnlockedCount = nextGroup.filter((animal) => nextUnlocks.has(getAnimalKey(animal))).length;
-    const targetUnlockCount = Math.min(masteredCount, nextGroup.length);
-    if (currentUnlockedCount >= targetUnlockCount) return;
+  const nextGroup = ANIMAL_GROUPS[currentGroupIndex + 1];
+  if (!nextGroup || !nextGroup.length) return unlocks;
 
-    const needed = targetUnlockCount - currentUnlockedCount;
-    const toUnlock = nextGroup.filter((animal) => !nextUnlocks.has(getAnimalKey(animal))).slice(0, needed);
-    toUnlock.forEach((animal) => nextUnlocks.add(getAnimalKey(animal)));
-  });
+  const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  const locked = nextGroup.filter((entry) => !nextUnlocks.has(getAnimalKey(entry)));
+  if (!locked.length) return unlocks;
+
+  const selection = shuffleArray(locked)[0];
+  if (selection) {
+    nextUnlocks.add(getAnimalKey(selection));
+  }
 
   return Array.from(nextUnlocks);
 }
@@ -425,28 +433,9 @@ function shuffleArray(arr) {
   return copy;
 }
 
-function buildAnimalSequence(availableAnimals, progress) {
-  const animalCounts = new Map();
-  const result = [];
-  let lastAnimalName = null;
-
-  while (result.length < TOTAL_ROUNDS) {
-    const availablePool = (availableAnimals || []).filter(
-      (animal) => (animalCounts.get(animal.name) || 0) < MAX_ANIMAL_OCCURRENCES
-    );
-    if (!availablePool.length) break;
-
-    const preferred = availablePool.filter((animal) => animal.name !== lastAnimalName);
-    const shuffledPool = shuffleArray(preferred.length ? preferred : availablePool);
-    const selected = shuffledPool[0];
-    result.push({
-      ...selected
-    });
-    animalCounts.set(selected.name, (animalCounts.get(selected.name) || 0) + 1);
-    lastAnimalName = selected.name;
-  }
-
-  return result;
+function buildAnimalSequence(availableAnimals) {
+  const pool = shuffleArray((availableAnimals || []).slice());
+  return pool.slice(0, TOTAL_ROUNDS);
 }
 
 function getAudioElement(source) {
@@ -815,14 +804,14 @@ function startNewGame() {
   animalCorrectCounts = loadAnimalCorrectCounts();
   unlockedAnimalKeys = loadUnlockedAnimals();
   unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
-  saveUnlockedAnimals(unlockedAnimalKeys);
   const availableAnimals = getUnlockedAnimalsForGame(unlockedAnimalKeys);
-  animalSequence = buildAnimalSequence(availableAnimals, animalProgress);
+  animalSequence = buildAnimalSequence(availableAnimals);
   currentIndex = 0;
   correctCount = 0;
   attemptCount = 0;
   recognizing = false;
   sttFatalError = false;
+  unlockedThisGame = false;
   lastWrongVariantSound = null;
   lastOneMoreTimeSound = null;
   lastPreQuestionFolder = null;
@@ -897,12 +886,8 @@ function updateUIForCurrentAnimal() {
 
   progressEl.textContent = `${displayIndex} / ${total}`;
   if (progressSummaryEl) {
-    const key = getAnimalKey(animal);
-    const count =
-      animalCorrectCounts && Object.prototype.hasOwnProperty.call(animalCorrectCounts, key)
-        ? animalCorrectCounts[key]
-        : 0;
-    progressSummaryEl.textContent = `Correct so far for ${animal.name}: ${count}`;
+    const level = getProgressForAnimal(animalProgress, animal);
+    progressSummaryEl.textContent = `Level for ${animal.name}: ${level}`;
   }
   setAnimalImageForOrientation(animal, imageNumber, currentOrientation);
   animalImageEl.alt = (animal && animal.name) || "Animal";
@@ -1014,18 +999,23 @@ function handleCorrect(animal) {
       : 0;
   animalCorrectCounts[correctKey] = (Number.isFinite(currentCorrectCount) ? currentCorrectCount : 0) + 1;
   saveAnimalCorrectCounts(animalCorrectCounts);
-  if (progressSummaryEl) {
-    progressSummaryEl.textContent = `Correct so far for ${animal.name}: ${animalCorrectCounts[correctKey]}`;
-  }
   const key = getAnimalKey(animal);
   const currentLevel = getProgressForAnimal(animalProgress, animal);
+  if (!unlockedThisGame && currentLevel >= ANIMAL_IMAGE_VARIANTS) {
+    const updatedUnlocks = unlockOneAnimalAbove(animal, unlockedAnimalKeys);
+    if (updatedUnlocks.length !== unlockedAnimalKeys.length) {
+      unlockedAnimalKeys = updatedUnlocks;
+      saveUnlockedAnimals(unlockedAnimalKeys);
+    }
+    unlockedThisGame = true;
+  }
   if (currentLevel < ANIMAL_IMAGE_VARIANTS) {
     animalProgress[key] = currentLevel + 1;
     saveAnimalProgress(animalProgress);
-    if (animalProgress[key] >= ANIMAL_IMAGE_VARIANTS) {
-      unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
-      saveUnlockedAnimals(unlockedAnimalKeys);
-    }
+  }
+  if (progressSummaryEl) {
+    const level = getProgressForAnimal(animalProgress, animal);
+    progressSummaryEl.textContent = `Level for ${animal.name}: ${level}`;
   }
 
   const variant = chooseRandomSound(soundCorrectVariantEls);
