@@ -1,9 +1,9 @@
-// Keep debug builds non-debuggable to avoid Android 16 KB compatibility popups
-// caused by misaligned native libraries (e.g., SQLCipher) on test devices.
+// Keep debug builds debuggable while investigating Android 16 KB compatibility
+// popups caused by misaligned native libraries (e.g., SQLCipher) on test devices.
 android {
     buildTypes {
         debug {
-            debuggable false
+            debuggable true
         }
     }
 }
