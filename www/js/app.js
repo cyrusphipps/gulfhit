@@ -47,7 +47,7 @@ function initLimetunaPortal() {
       console.log("Selected:", game.id);
 
       if (game.id === "letters") {
-        window.location.href = "letters.html";
+        openLettersModal();
       } else if (game.id === "progress") {
         window.location.href = "progress.html";
       } else if (game.id === "animals") {
@@ -96,6 +96,13 @@ function initLimetunaPortal() {
     modalOverlay.classList.remove("hidden");
   }
 
+  function openLettersModal() {
+    if (!modalOverlay) return;
+    modalTitleEl.textContent = "Letters";
+    modalBodyEl.textContent = "This is the letters game.";
+    modalOverlay.classList.remove("hidden");
+  }
+
   function openResetModal() {
     if (!modalOverlay) return;
     modalTitleEl.textContent = "Progress reset";
@@ -135,7 +142,7 @@ function resetAnimalsProgress() {
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 1.9.11 portal");
+  console.log("Cordova deviceready fired, initializing Gulfhit 2.0.1 portal");
   initLimetunaPortal();
 }
 
