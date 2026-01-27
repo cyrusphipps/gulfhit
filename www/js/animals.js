@@ -1,4 +1,4 @@
-// animals.js – simple speech game modeled after Letters
+// animals.js – animal speech game
 
 const ANIMAL_GROUPS = [
   [
@@ -197,8 +197,6 @@ const ACTIVE_GROUP_COUNT = 1;
 const TOTAL_ROUNDS = 6;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const ANIMAL_IMAGE_VARIANTS = 5;
-const CORRECT_SOUND_DURATION_MS = 2000; // correct.wav ~2s
-const CORRECT_VARIANT_OVERLAP_MS = 2000;
 const ANIMALS_STATUS_PROMPT = "";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
@@ -254,6 +252,7 @@ let animalProgress = {};
 let unlockedAnimalKeys = [];
 let animalCorrectCounts = {};
 let unlockedThisGame = false;
+let currentAttemptToken = 0;
 
 const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
@@ -525,16 +524,9 @@ function playAudioSequence(sequence, onComplete) {
 
 function playCorrectSequence(correct, variant, celebration, effect, onComplete) {
   const correctEl = getAudioElement(correct);
-  const durationMs =
-    correctEl && Number.isFinite(correctEl.duration) && correctEl.duration > 0
-      ? Math.round(correctEl.duration * 1000)
-      : CORRECT_SOUND_DURATION_MS;
-
-  playSound(correctEl);
-  const overlapDelayMs = Math.max(durationMs - CORRECT_VARIANT_OVERLAP_MS, 0);
-  setTimeout(() => {
+  playSound(correctEl, () => {
     playAudioSequence([variant, celebration, effect], onComplete);
-  }, overlapDelayMs);
+  });
 }
 
 function chooseRandomSound(pool, lastSound) {
@@ -914,6 +906,7 @@ function startListeningForCurrentAnimal(options = {}) {
     console.warn("No animal at index", currentIndex);
     return;
   }
+  const attemptToken = (currentAttemptToken += 1);
 
   const beginListening = () => {
     if (recognizing) {
@@ -928,6 +921,10 @@ function startListeningForCurrentAnimal(options = {}) {
       LimeTunaSpeech.startLetter(
         animal.name,
         function (result) {
+          if (attemptToken !== currentAttemptToken) {
+            console.warn("[animals] stale result ignored", { attemptToken, currentAttemptToken });
+            return;
+          }
           recognizing = false;
           const rawText = result && result.text ? result.text : "";
           const allResults =
@@ -945,6 +942,10 @@ function startListeningForCurrentAnimal(options = {}) {
           }
         },
         function (err) {
+          if (attemptToken !== currentAttemptToken) {
+            console.warn("[animals] stale error ignored", { attemptToken, currentAttemptToken, err });
+            return;
+          }
           recognizing = false;
           const code = parseErrorCode(err);
           console.error("LimeTunaSpeech.startLetter error (animals):", err, "code=", code);

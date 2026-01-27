@@ -241,9 +241,8 @@ body {
 }
 
 
-/* Letters & Animals game layout */
+/* Animals game layout */
 
-.letters-app,
 .animals-app {
   min-height: 100vh;
   display: flex;
@@ -251,7 +250,6 @@ body {
   padding: 16px;
 }
 
-.letters-main,
 .animals-main {
   flex: 1;
   display: flex;
@@ -259,7 +257,6 @@ body {
   align-items: center;
 }
 
-.letters-card,
 .animals-card {
   background: #ffffff;
   border-radius: var(--radius-large);
@@ -269,17 +266,12 @@ body {
   text-align: center;
 }
 
-.letters-card {
-  max-width: 480px;
-}
-
 .animals-card {
   max-width: 680px;
   width: min(96vw, 680px);
   padding: 24px 18px 20px;
 }
 
-.letters-progress,
 .animals-progress {
   font-size: 0.95rem;
   opacity: 0.7;
@@ -342,21 +334,12 @@ body {
   }
 }
 
-.letters-current-letter {
-  font-size: 10rem; /* was 5rem; now doubled for better visibility */
-  font-weight: 700;
-  margin-bottom: 12px;
-  letter-spacing: 0.08em;
-}
-
-.letters-status,
 .animals-status {
   font-size: 1rem;
   margin-bottom: 8px;
   opacity: 0.8;
 }
 
-.letters-feedback,
 .animals-feedback {
   min-height: 24px;
   font-size: 1.1rem;
@@ -364,14 +347,12 @@ body {
   margin-bottom: 12px;
 }
 
-.letters-final-score,
 .animals-final-score {
   margin-top: 8px;
   font-size: 1.2rem;
   font-weight: 600;
 }
 
-.letters-timing-panel,
 .animals-timing-panel {
   margin: 10px auto 6px;
   padding: 10px 12px;
@@ -424,7 +405,6 @@ body {
 }
 
 /* Temporary RMS debug panel (remove when speech tuning completes) */
-.letters-rms-panel,
 .animals-rms-panel {
   margin: 6px auto 10px;
   padding: 8px 12px;
@@ -437,13 +417,11 @@ body {
   transition: opacity 0.2s ease, color 0.2s ease;
 }
 
-.letters-rms-panel.rms-idle,
 .animals-rms-panel.rms-idle {
   opacity: 0.6;
   color: #6c737c;
 }
 
-.letters-rms-panel.rms-active,
 .animals-rms-panel.rms-active {
   opacity: 1;
 }
@@ -464,7 +442,6 @@ body {
   font-size: 0.85rem;
 }
 
-.letters-controls,
 .animals-controls {
   margin-top: 16px;
   display: flex;
