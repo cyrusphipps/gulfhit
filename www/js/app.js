@@ -13,6 +13,7 @@ const LIMETUNA_GAMES = [
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
 const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
+const ANIMALS_UNLOCK_COUNTER_STORAGE_KEY = "gulfhit.animals.unlockCounter";
 
 let animalsTileSound = null;
 
@@ -135,6 +136,7 @@ function resetAnimalsProgress() {
     window.localStorage.removeItem(ANIMALS_PROGRESS_STORAGE_KEY);
     window.localStorage.removeItem(ANIMALS_UNLOCKS_STORAGE_KEY);
     window.localStorage.removeItem(ANIMALS_CORRECT_COUNTS_STORAGE_KEY);
+    window.localStorage.removeItem(ANIMALS_UNLOCK_COUNTER_STORAGE_KEY);
   } catch (e) {
     console.warn("Unable to reset animal progress:", e);
   }
@@ -142,7 +144,7 @@ function resetAnimalsProgress() {
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 2.0.1 portal");
+  console.log("Cordova deviceready fired, initializing Gulfhit 2.0.2 portal");
   initLimetunaPortal();
 }
 
