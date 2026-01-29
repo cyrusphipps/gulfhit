@@ -193,7 +193,7 @@ const ANIMAL_GROUPS = [
   ]
 ];
 
-const ACTIVE_GROUP_COUNT = 1;
+const ACTIVE_GROUP_COUNT = ANIMAL_GROUPS.length;
 const TOTAL_ROUNDS = 6;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const ANIMAL_IMAGE_VARIANTS = 5;
@@ -209,6 +209,13 @@ const ANIMALS_SPEECH_OPTIONS = {
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
 const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
+const ANIMALS_UNLOCK_COUNTER_STORAGE_KEY = "gulfhit.animals.unlockCounter";
+const GROUP_UNLOCK_REQUIREMENTS = [
+  { groupIndex: 1, requiredCorrect: 6 },
+  { groupIndex: 2, requiredCorrect: 12 },
+  { groupIndex: 3, requiredCorrect: 18 },
+  { groupIndex: 4, requiredCorrect: 24 }
+];
 const ACTIVE_GROUPS = ANIMAL_GROUPS.slice(0, ACTIVE_GROUP_COUNT);
 const ANIMALS = ACTIVE_GROUPS.flat();
 
@@ -251,8 +258,8 @@ let currentAnimalEntry = null;
 let animalProgress = {};
 let unlockedAnimalKeys = [];
 let animalCorrectCounts = {};
-let unlockedThisGame = false;
 let currentAttemptToken = 0;
+let unlockCorrectCount = 0;
 
 const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
@@ -345,6 +352,12 @@ function loadAnimalCorrectCounts() {
   return normalized;
 }
 
+function loadUnlockCorrectCount() {
+  const raw = loadStoredJson(ANIMALS_UNLOCK_COUNTER_STORAGE_KEY, 0);
+  const count = Number(raw);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
 function loadUnlockedAnimals() {
   const stored = loadStoredJson(ANIMALS_UNLOCKS_STORAGE_KEY, []);
   if (!Array.isArray(stored)) return [];
@@ -359,6 +372,10 @@ function saveAnimalCorrectCounts(counts) {
   saveStoredJson(ANIMALS_CORRECT_COUNTS_STORAGE_KEY, counts);
 }
 
+function saveUnlockCorrectCount(count) {
+  saveStoredJson(ANIMALS_UNLOCK_COUNTER_STORAGE_KEY, count);
+}
+
 function saveUnlockedAnimals(unlocks) {
   saveStoredJson(ANIMALS_UNLOCKS_STORAGE_KEY, unlocks);
 }
@@ -371,24 +388,45 @@ function ensureUnlockedFromProgress(progress, unlocks) {
   return Array.from(nextUnlocks).filter((key) => validKeys.has(key));
 }
 
-function unlockOneAnimalAbove(animal, unlocks) {
-  const currentGroupIndex = ANIMAL_GROUPS.findIndex((group) =>
-    group.some((entry) => getAnimalKey(entry) === getAnimalKey(animal))
-  );
-  if (currentGroupIndex === -1) return unlocks;
+function isGroupFullyUnlocked(groupIndex, unlocks) {
+  if (groupIndex <= 0) return true;
+  const group = ANIMAL_GROUPS[groupIndex];
+  if (!group || !group.length) return true;
+  const unlockedKeys = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  return group.every((animal) => unlockedKeys.has(getAnimalKey(animal)));
+}
 
-  const nextGroup = ANIMAL_GROUPS[currentGroupIndex + 1];
-  if (!nextGroup || !nextGroup.length) return unlocks;
+function getLockedAnimalsInGroup(groupIndex, unlocks) {
+  const group = ANIMAL_GROUPS[groupIndex] || [];
+  const unlockedKeys = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+  return group.filter((animal) => !unlockedKeys.has(getAnimalKey(animal)));
+}
 
+function getNextUnlockTarget(unlocks) {
+  for (const requirement of GROUP_UNLOCK_REQUIREMENTS) {
+    const groupIndex = requirement.groupIndex;
+    const locked = getLockedAnimalsInGroup(groupIndex, unlocks);
+    if (!locked.length) continue;
+    if (groupIndex === 1 || isGroupFullyUnlocked(groupIndex - 1, unlocks)) {
+      return {
+        groupIndex,
+        requiredCorrect: requirement.requiredCorrect,
+        locked
+      };
+    }
+    return null;
+  }
+  return null;
+}
+
+function unlockOneAnimalInGroup(unlocks, groupIndex) {
   const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
-  const locked = nextGroup.filter((entry) => !nextUnlocks.has(getAnimalKey(entry)));
-  if (!locked.length) return unlocks;
-
+  const locked = getLockedAnimalsInGroup(groupIndex, Array.from(nextUnlocks));
+  if (!locked.length) return Array.from(nextUnlocks);
   const selection = shuffleArray(locked)[0];
   if (selection) {
     nextUnlocks.add(getAnimalKey(selection));
   }
-
   return Array.from(nextUnlocks);
 }
 
@@ -796,6 +834,7 @@ function startNewGame() {
   animalCorrectCounts = loadAnimalCorrectCounts();
   unlockedAnimalKeys = loadUnlockedAnimals();
   unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
+  unlockCorrectCount = loadUnlockCorrectCount();
   const availableAnimals = getUnlockedAnimalsForGame(unlockedAnimalKeys);
   animalSequence = buildAnimalSequence(availableAnimals);
   currentIndex = 0;
@@ -803,7 +842,6 @@ function startNewGame() {
   attemptCount = 0;
   recognizing = false;
   sttFatalError = false;
-  unlockedThisGame = false;
   lastWrongVariantSound = null;
   lastOneMoreTimeSound = null;
   lastPreQuestionFolder = null;
@@ -993,6 +1031,7 @@ function handleCorrect(animal) {
   statusEl.textContent = ANIMALS_STATUS_PROMPT;
 
   correctCount++;
+  unlockCorrectCount += 1;
   const correctKey = getAnimalKey(animal);
   const currentCorrectCount =
     animalCorrectCounts && Object.prototype.hasOwnProperty.call(animalCorrectCounts, correctKey)
@@ -1000,16 +1039,22 @@ function handleCorrect(animal) {
       : 0;
   animalCorrectCounts[correctKey] = (Number.isFinite(currentCorrectCount) ? currentCorrectCount : 0) + 1;
   saveAnimalCorrectCounts(animalCorrectCounts);
-  const key = getAnimalKey(animal);
-  const currentLevel = getProgressForAnimal(animalProgress, animal);
-  if (!unlockedThisGame && currentLevel >= ANIMAL_IMAGE_VARIANTS) {
-    const updatedUnlocks = unlockOneAnimalAbove(animal, unlockedAnimalKeys);
+  const targetUnlock = getNextUnlockTarget(unlockedAnimalKeys);
+  let didUnlock = false;
+  if (targetUnlock && unlockCorrectCount >= targetUnlock.requiredCorrect) {
+    const updatedUnlocks = unlockOneAnimalInGroup(unlockedAnimalKeys, targetUnlock.groupIndex);
     if (updatedUnlocks.length !== unlockedAnimalKeys.length) {
       unlockedAnimalKeys = updatedUnlocks;
       saveUnlockedAnimals(unlockedAnimalKeys);
+      didUnlock = true;
     }
-    unlockedThisGame = true;
   }
+  if (didUnlock) {
+    unlockCorrectCount = 0;
+  }
+  saveUnlockCorrectCount(unlockCorrectCount);
+  const key = getAnimalKey(animal);
+  const currentLevel = getProgressForAnimal(animalProgress, animal);
   if (currentLevel < ANIMAL_IMAGE_VARIANTS) {
     animalProgress[key] = currentLevel + 1;
     saveAnimalProgress(animalProgress);

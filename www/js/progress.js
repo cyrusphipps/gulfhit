@@ -135,7 +135,7 @@ const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
 const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
 const ANIMAL_IMAGE_VARIANTS = 5;
 
-const ACTIVE_GROUP_COUNT = 1;
+const ACTIVE_GROUP_COUNT = ANIMAL_GROUPS.length;
 const ANIMALS = ANIMAL_GROUPS.slice(0, ACTIVE_GROUP_COUNT).flat();
 
 function getAnimalKey(animal) {
