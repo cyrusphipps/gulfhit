@@ -477,6 +477,7 @@ body {
   text-transform: uppercase;
   margin-bottom: 6px;
   color: var(--color-accent-5);
+  white-space: nowrap;
 }
 
 .animals-unlock-name {
@@ -490,11 +491,11 @@ body {
   aspect-ratio: 3 / 4;
   margin: 0 auto 16px;
   border-radius: var(--radius-medium);
-  background: #f4f6fb;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 12px;
+  padding: 0;
 }
 
 .animals-unlock-image {

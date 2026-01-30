@@ -1235,18 +1235,17 @@ function endGame() {
 
   const winThreshold = Math.ceil(TOTAL_ROUNDS * 0.8);
   if (correctCount >= winThreshold) {
-    playSound(soundWinEl);
-    if (newlyUnlockedAnimal && soundLevelUpEl) {
-      setTimeout(() => {
-        playSound(soundLevelUpEl);
-      }, 2000);
-    }
+    playSound(soundWinEl, () => {
+      if (newlyUnlockedAnimal) {
+        const effectSound = animalEffectEls[newlyUnlockedAnimal.name];
+        playAudioSequence([soundLevelUpEl, effectSound]);
+        setTimeout(() => {
+          showUnlockModal(newlyUnlockedAnimal);
+        }, 1000);
+      }
+    });
   } else {
     playSound(soundLoseEl);
-  }
-
-  if (newlyUnlockedAnimal) {
-    showUnlockModal(newlyUnlockedAnimal);
   }
 }
 
