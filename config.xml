@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
-<widget id="com.limetuna.app" version="2.0.6" android-versionCode="20006" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
-    <name>Gulfhit 2.0.6</name>
+<widget id="com.limetuna.app" version="2.0.7" android-versionCode="20007" xmlns="http://www.w3.org/ns/widgets" xmlns:cdv="http://cordova.apache.org/ns/1.0">
+    <name>Gulfhit 2.0.7</name>
     <description>
         A sample Apache Cordova application that responds to the deviceready event.
     </description>

@@ -132,8 +132,10 @@ const ANIMAL_GROUPS = [
 ];
 
 const ANIMALS_PROGRESS_STORAGE_KEY = "gulfhit.animals.progress";
+const ANIMALS_UNLOCKS_STORAGE_KEY = "gulfhit.animals.unlocks";
 const ANIMALS_CORRECT_COUNTS_STORAGE_KEY = "gulfhit.animals.correctCounts";
 const ANIMAL_IMAGE_VARIANTS = 5;
+const MAX_ANIMAL_LEVEL = 6;
 
 const ACTIVE_GROUP_COUNT = ANIMAL_GROUPS.length;
 const ANIMALS = ANIMAL_GROUPS.slice(0, ACTIVE_GROUP_COUNT).flat();
@@ -144,12 +146,23 @@ function getAnimalKey(animal) {
     .trim();
 }
 
-function getProgressForAnimal(progressMap, animal) {
+function getUnlockKeySet(unlocks) {
+  return new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+}
+
+function isAnimalUnlocked(animal, groupNumber, unlockedSet) {
+  if (groupNumber <= 1) return true;
+  if (!unlockedSet) return false;
+  return unlockedSet.has(getAnimalKey(animal));
+}
+
+function getProgressForAnimal(progressMap, animal, unlockedSet, groupNumber) {
+  if (unlockedSet && !isAnimalUnlocked(animal, groupNumber, unlockedSet)) return 0;
   const key = getAnimalKey(animal);
   const raw = progressMap && Object.prototype.hasOwnProperty.call(progressMap, key) ? progressMap[key] : 1;
   const level = Number(raw);
   if (!Number.isFinite(level) || level < 1) return 1;
-  if (level > ANIMAL_IMAGE_VARIANTS) return ANIMAL_IMAGE_VARIANTS;
+  if (level > MAX_ANIMAL_LEVEL) return MAX_ANIMAL_LEVEL;
   return level;
 }
 
@@ -166,7 +179,7 @@ function loadStoredJson(key, fallback) {
   }
 }
 
-function buildProgressRow(animal, progressMap, countsMap) {
+function buildProgressRow(animal, progressMap, countsMap, unlockedSet, groupNumber) {
   const row = document.createElement("tr");
   const nameCell = document.createElement("td");
   nameCell.textContent = animal.name;
@@ -177,8 +190,8 @@ function buildProgressRow(animal, progressMap, countsMap) {
   correctCell.textContent = Number.isFinite(count) && count > 0 ? String(count) : "0";
 
   const levelCell = document.createElement("td");
-  const level = getProgressForAnimal(progressMap, animal);
-  levelCell.textContent = `${level} / ${ANIMAL_IMAGE_VARIANTS}`;
+  const level = getProgressForAnimal(progressMap, animal, unlockedSet, groupNumber);
+  levelCell.textContent = `${level} / ${MAX_ANIMAL_LEVEL}`;
 
   row.append(nameCell, correctCell, levelCell);
   return row;
@@ -191,17 +204,21 @@ function renderProgressTable() {
 
   const progressMap = loadStoredJson(ANIMALS_PROGRESS_STORAGE_KEY, {});
   const countsMap = loadStoredJson(ANIMALS_CORRECT_COUNTS_STORAGE_KEY, {});
+  const unlockedSet = getUnlockKeySet(loadStoredJson(ANIMALS_UNLOCKS_STORAGE_KEY, []));
 
   tableBody.innerHTML = "";
 
   let totalCorrect = 0;
-  ANIMALS.forEach((animal) => {
-    tableBody.appendChild(buildProgressRow(animal, progressMap, countsMap));
-    const key = getAnimalKey(animal);
-    const count = countsMap && Object.prototype.hasOwnProperty.call(countsMap, key) ? Number(countsMap[key]) : 0;
-    if (Number.isFinite(count)) {
-      totalCorrect += count;
-    }
+  ANIMAL_GROUPS.forEach((group, index) => {
+    const groupNumber = index + 1;
+    group.forEach((animal) => {
+      tableBody.appendChild(buildProgressRow(animal, progressMap, countsMap, unlockedSet, groupNumber));
+      const key = getAnimalKey(animal);
+      const count = countsMap && Object.prototype.hasOwnProperty.call(countsMap, key) ? Number(countsMap[key]) : 0;
+      if (Number.isFinite(count)) {
+        totalCorrect += count;
+      }
+    });
   });
 
   if (summaryEl) {

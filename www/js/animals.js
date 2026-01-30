@@ -197,6 +197,7 @@ const ACTIVE_GROUP_COUNT = ANIMAL_GROUPS.length;
 const TOTAL_ROUNDS = 6;
 const MAX_ATTEMPTS_PER_ANIMAL = 2;
 const ANIMAL_IMAGE_VARIANTS = 5;
+const MAX_ANIMAL_LEVEL = 6;
 const ANIMALS_STATUS_PROMPT = "";
 const ANIMALS_SPEECH_OPTIONS = {
   language: "en-US",
@@ -292,12 +293,24 @@ function getAnimalKey(animal) {
     .trim();
 }
 
-function getProgressForAnimal(progressMap, animal) {
+function getUnlockKeySet(unlocks) {
+  return new Set((unlocks || []).map((key) => String(key).toLowerCase()));
+}
+
+function isAnimalUnlocked(animal, unlockedSet) {
+  const group = Number.isFinite(animal && animal.group) ? animal.group : 1;
+  if (group <= 1) return true;
+  if (!unlockedSet) return false;
+  return unlockedSet.has(getAnimalKey(animal));
+}
+
+function getProgressForAnimal(progressMap, animal, unlockedSet) {
+  if (unlockedSet && !isAnimalUnlocked(animal, unlockedSet)) return 0;
   const key = getAnimalKey(animal);
   const raw = progressMap && Object.prototype.hasOwnProperty.call(progressMap, key) ? progressMap[key] : 1;
   const level = Number(raw);
   if (!Number.isFinite(level) || level < 1) return 1;
-  if (level > ANIMAL_IMAGE_VARIANTS) return ANIMAL_IMAGE_VARIANTS;
+  if (level > MAX_ANIMAL_LEVEL) return MAX_ANIMAL_LEVEL;
   return level;
 }
 
@@ -331,12 +344,13 @@ function saveStoredJson(key, value) {
   }
 }
 
-function loadAnimalProgress() {
+function loadAnimalProgress(unlocks) {
   const stored = loadStoredJson(ANIMALS_PROGRESS_STORAGE_KEY, {});
+  const unlockedSet = getUnlockKeySet(unlocks);
   const normalized = {};
   ANIMALS.forEach((animal) => {
     const key = getAnimalKey(animal);
-    normalized[key] = getProgressForAnimal(stored, animal);
+    normalized[key] = getProgressForAnimal(stored, animal, unlockedSet);
   });
   return normalized;
 }
@@ -880,9 +894,9 @@ function initAnimalsGame() {
 }
 
 function startNewGame() {
-  animalProgress = loadAnimalProgress();
-  animalCorrectCounts = loadAnimalCorrectCounts();
   unlockedAnimalKeys = loadUnlockedAnimals();
+  animalProgress = loadAnimalProgress(unlockedAnimalKeys);
+  animalCorrectCounts = loadAnimalCorrectCounts();
   unlockedAnimalKeys = ensureUnlockedFromProgress(animalProgress, unlockedAnimalKeys);
   unlockStreakCount = loadUnlockStreakCount();
   const availableAnimals = getUnlockedAnimalsForGame(unlockedAnimalKeys);
@@ -1091,8 +1105,8 @@ function handleCorrect(animal) {
   saveAnimalCorrectCounts(animalCorrectCounts);
   const key = getAnimalKey(animal);
   const currentLevel = getProgressForAnimal(animalProgress, animal);
-  if (currentLevel < ANIMAL_IMAGE_VARIANTS) {
-    animalProgress[key] = currentLevel + 1;
+  if (currentLevel < MAX_ANIMAL_LEVEL) {
+    animalProgress[key] = Math.min(currentLevel + 1, MAX_ANIMAL_LEVEL);
     saveAnimalProgress(animalProgress);
   }
   if (progressSummaryEl) {
@@ -1241,7 +1255,7 @@ function endGame() {
         playAudioSequence([soundLevelUpEl, effectSound]);
         setTimeout(() => {
           showUnlockModal(newlyUnlockedAnimal);
-        }, 1000);
+        }, 500);
       }
     });
   } else {
