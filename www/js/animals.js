@@ -240,6 +240,7 @@ let soundCorrectEl;
 let soundWrongEl;
 let soundWinEl;
 let soundLoseEl;
+let soundLevelUpEl;
 let soundCorrectVariantEls = [];
 let soundWrongVariantEls = [];
 let soundOneMoreTimeEls = [];
@@ -255,6 +256,11 @@ let unlockedAnimalKeys = [];
 let animalCorrectCounts = {};
 let currentAttemptToken = 0;
 let unlockStreakCount = 0;
+let unlockModalEl;
+let unlockModalNameEl;
+let unlockModalImageEl;
+let unlockModalCloseEl;
+let unlockedAnimalForModal = null;
 
 const audioCache = new Map();
 const ORIENTATION_QUERY = "(orientation: landscape)";
@@ -416,12 +422,12 @@ function getUnlockStage(unlocks) {
 function unlockOneAnimalInGroup(unlocks, groupNumber) {
   const nextUnlocks = new Set((unlocks || []).map((key) => String(key).toLowerCase()));
   const locked = getLockedAnimalsInGroup(groupNumber, Array.from(nextUnlocks));
-  if (!locked.length) return Array.from(nextUnlocks);
+  if (!locked.length) return { unlocks: Array.from(nextUnlocks), unlockedAnimal: null };
   const selection = shuffleArray(locked)[0];
   if (selection) {
     nextUnlocks.add(getAnimalKey(selection));
   }
-  return Array.from(nextUnlocks);
+  return { unlocks: Array.from(nextUnlocks), unlockedAnimal: selection || null };
 }
 
 function getUnlockedAnimalsForGame(unlocks) {
@@ -453,6 +459,29 @@ function setAnimalImageForOrientation(animal, imageNumber, orientation) {
   if (currentSrc !== imagePath) {
     animalImageEl.setAttribute("src", imagePath);
   }
+}
+
+function updateUnlockModalImage() {
+  if (!unlockModalImageEl || !unlockedAnimalForModal) return;
+  const orientation = getOrientation();
+  const imagePath = getAnimalImagePath(unlockedAnimalForModal, 1, orientation);
+  if (imagePath) {
+    unlockModalImageEl.setAttribute("src", imagePath);
+  }
+}
+
+function showUnlockModal(animal) {
+  if (!unlockModalEl || !unlockModalNameEl || !unlockModalImageEl || !animal) return;
+  unlockedAnimalForModal = animal;
+  unlockModalNameEl.textContent = animal.name || "";
+  updateUnlockModalImage();
+  unlockModalEl.classList.remove("hidden");
+}
+
+function hideUnlockModal() {
+  if (!unlockModalEl) return;
+  unlockModalEl.classList.add("hidden");
+  unlockedAnimalForModal = null;
 }
 
 function shuffleArray(arr) {
@@ -720,11 +749,16 @@ function initAnimalsGame() {
   backToHomeBtn = document.getElementById("backToHomeBtn");
   restartGameBtn = document.getElementById("restartGameBtn");
   animalImageEl = document.getElementById("animalImage");
+  unlockModalEl = document.getElementById("unlockModal");
+  unlockModalNameEl = document.getElementById("unlockAnimalName");
+  unlockModalImageEl = document.getElementById("unlockAnimalImage");
+  unlockModalCloseEl = document.getElementById("unlockModalClose");
 
   soundCorrectEl = document.getElementById("soundCorrect");
   soundWrongEl = document.getElementById("soundWrong");
   soundWinEl = document.getElementById("soundWin");
   soundLoseEl = document.getElementById("soundLose");
+  soundLevelUpEl = document.getElementById("soundLevelUp");
   soundCorrectVariantEls = [
     "audio/correct_v1.mp3",
     "audio/correct_v2.mp3",
@@ -765,6 +799,7 @@ function initAnimalsGame() {
     soundWrongEl,
     soundWinEl,
     soundLoseEl,
+    soundLevelUpEl,
     ...soundCorrectVariantEls,
     ...soundWrongVariantEls,
     ...soundOneMoreTimeEls,
@@ -774,7 +809,7 @@ function initAnimalsGame() {
     ...Object.values(animalEffectEls)
   ]);
 
-  [soundCorrectEl, soundWrongEl, soundWinEl, soundLoseEl].forEach((el) => {
+  [soundCorrectEl, soundWrongEl, soundWinEl, soundLoseEl, soundLevelUpEl].forEach((el) => {
     if (el) {
       el.muted = false;
       el.volume = 1.0;
@@ -795,6 +830,9 @@ function initAnimalsGame() {
     if (!currentAnimalEntry) return;
     const imageNumber = currentAnimalEntry.imageNumber || 1;
     setAnimalImageForOrientation(currentAnimalEntry, imageNumber, currentOrientation);
+    if (unlockModalEl && !unlockModalEl.classList.contains("hidden")) {
+      updateUnlockModalImage();
+    }
   };
 
   if (orientationQuery && typeof orientationQuery.addEventListener === "function") {
@@ -825,6 +863,19 @@ function initAnimalsGame() {
     });
   }
 
+  if (unlockModalCloseEl) {
+    unlockModalCloseEl.addEventListener("click", () => {
+      hideUnlockModal();
+    });
+  }
+  if (unlockModalEl) {
+    unlockModalEl.addEventListener("click", (event) => {
+      if (event.target === unlockModalEl) {
+        hideUnlockModal();
+      }
+    });
+  }
+
   startNewGame();
 }
 
@@ -847,6 +898,7 @@ function startNewGame() {
   preQuestionFolderStreak = 0;
   lastAnimalCelebrationSound = {};
   currentOrientation = getOrientation();
+  hideUnlockModal();
 
   finalScoreEl.classList.add("hidden");
   if (restartGameBtn) restartGameBtn.classList.add("hidden");
@@ -1148,15 +1200,17 @@ function endGame() {
   finalScoreEl.textContent = msg;
   finalScoreEl.classList.remove("hidden");
 
+  let newlyUnlockedAnimal = null;
   const stage = getUnlockStage(unlockedAnimalKeys);
   if (stage) {
     if (correctCount >= MIN_CORRECT_FOR_UNLOCK) {
       unlockStreakCount += 1;
       if (unlockStreakCount >= stage.requiredStreak) {
-        const updatedUnlocks = unlockOneAnimalInGroup(unlockedAnimalKeys, stage.groupNumber);
-        if (updatedUnlocks.length !== unlockedAnimalKeys.length) {
-          unlockedAnimalKeys = updatedUnlocks;
+        const result = unlockOneAnimalInGroup(unlockedAnimalKeys, stage.groupNumber);
+        if (result.unlocks.length !== unlockedAnimalKeys.length) {
+          unlockedAnimalKeys = result.unlocks;
           saveUnlockedAnimals(unlockedAnimalKeys);
+          newlyUnlockedAnimal = result.unlockedAnimal;
         }
         unlockStreakCount = 0;
       }
@@ -1182,8 +1236,17 @@ function endGame() {
   const winThreshold = Math.ceil(TOTAL_ROUNDS * 0.8);
   if (correctCount >= winThreshold) {
     playSound(soundWinEl);
+    if (newlyUnlockedAnimal && soundLevelUpEl) {
+      setTimeout(() => {
+        playSound(soundLevelUpEl);
+      }, 2000);
+    }
   } else {
     playSound(soundLoseEl);
+  }
+
+  if (newlyUnlockedAnimal) {
+    showUnlockModal(newlyUnlockedAnimal);
   }
 }
 

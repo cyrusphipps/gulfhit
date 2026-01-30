@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>Gulfhit 2.0.3 · Animals</title>
+  <title>Gulfhit 2.0.4 · Animals</title>
   <meta
     name="viewport"
     content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover"
@@ -56,10 +56,24 @@
     </main>
   </div>
 
+  <div id="unlockModal" class="animals-unlock-modal hidden" role="dialog" aria-modal="true">
+    <div class="animals-unlock-card" role="document">
+      <div class="animals-unlock-title">Unlocked</div>
+      <div class="animals-unlock-name" id="unlockAnimalName"></div>
+      <div class="animals-unlock-image-frame">
+        <img id="unlockAnimalImage" class="animals-unlock-image" src="" alt="Unlocked animal" />
+      </div>
+      <button id="unlockModalClose" class="btn-secondary animals-unlock-close" type="button">
+        Continue
+      </button>
+    </div>
+  </div>
+
   <!-- Audio feedback -->
   <audio id="soundCorrect" src="audio/correct.wav" preload="auto"></audio>
   <audio id="soundWrong" src="audio/wrong.wav" preload="auto"></audio>
   <audio id="soundWin" src="audio/win.wav" preload="auto"></audio>
   <audio id="soundLose" src="audio/lose.wav" preload="auto"></audio>
+  <audio id="soundLevelUp" src="audio/levelup.wav" preload="auto"></audio>
 </body>
 </html>

@@ -144,7 +144,7 @@ function resetAnimalsProgress() {
 
 // Cordova deviceready handling
 function onDeviceReady() {
-  console.log("Cordova deviceready fired, initializing Gulfhit 2.0.3 portal");
+  console.log("Cordova deviceready fired, initializing Gulfhit 2.0.4 portal");
   initLimetunaPortal();
 }
 
