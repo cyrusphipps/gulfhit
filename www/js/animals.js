@@ -791,7 +791,7 @@ function initAnimalsGame() {
       `audio/animals/${base}_cv2.mp3`,
       `audio/animals/${base}_cv3.mp3`
     ].map(getAudioElement);
-    animalEffectEls[key] = getAudioElement(`audio/animals/${base}_e.wav`);
+    animalEffectEls[key] = getAudioElement(`audio/animals/${base}_e.mp3`);
   });
 
   primeAudioElements([
