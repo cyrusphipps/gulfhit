@@ -291,8 +291,8 @@ body {
   aspect-ratio: 2 / 3;
   max-height: 72vh;
   border-radius: var(--radius-medium);
-  background: #f5f7fb;
-  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+  background: transparent;
+  box-shadow: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -475,7 +475,6 @@ body {
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
-  margin-bottom: 6px;
   color: var(--color-accent-5);
   white-space: nowrap;
 }
@@ -483,6 +482,13 @@ body {
 .animals-unlock-name {
   font-size: 1.2rem;
   font-weight: 600;
+}
+
+.animals-unlock-header {
+  display: inline-flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 10px;
   margin-bottom: 14px;
 }
 
@@ -502,6 +508,9 @@ body {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  object-position: center;
+  display: block;
+  margin: 0 auto;
 }
 
 .animals-unlock-close {
