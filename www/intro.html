@@ -242,11 +242,34 @@ function loop(t) {
   /* =========================
      Title Card
   ========================= */
-  const titleW = canvas.width * 0.5775;
-  const titleH = Math.min(420, canvas.height * 0.45);
-  const titleX = (canvas.width - titleW) / 2;
-  const titleY = canvas.height * 0.12;
   const isPortrait = canvas.height > canvas.width;
+  const titlePaddingX = 15;
+  const titlePaddingY = Math.max(24, Math.min(46, canvas.height * 0.05));
+  const titleGap = Math.max(16, Math.min(34, canvas.height * 0.04));
+  const titleMaxW = canvas.width * (isPortrait ? 0.9 : 0.62);
+  const titleMaxTextW = titleMaxW - titlePaddingX * 2;
+
+  const discoverySize = fitFontSize(
+    "Discovery",
+    800,
+    Math.min(120, titleMaxW * 0.22),
+    titleMaxTextW
+  );
+  const animalsSize = fitFontSize(
+    "Animals",
+    800,
+    Math.min(140, titleMaxW * 0.24),
+    titleMaxTextW
+  );
+  const discoveryFont = `800 ${discoverySize}px 'Baloo 2'`;
+  const animalsFont = `800 ${animalsSize}px 'Baloo 2'`;
+
+  const dH = textHeight("Discovery", discoveryFont);
+  const aH = textHeight("Animals", animalsFont);
+  const titleH = dH + aH + titleGap + titlePaddingY * 2;
+  const titleW = titleMaxW;
+  const titleX = (canvas.width - titleW) / 2;
+  const titleY = Math.max(canvas.height * 0.08, titlePaddingY);
 
   ctx.fillStyle = "#2f3a5f";
   roundRect(titleX, titleY, titleW, titleH, 40);
@@ -260,30 +283,8 @@ function loop(t) {
   /* =========================
      Title Text
   ========================= */
-  const titlePaddingX = isPortrait ? 45 : 30;
-  const maxTextWidth = titleW - titlePaddingX * 2;
-  const discoverySize = fitFontSize(
-    "Discovery",
-    800,
-    Math.min(120, titleW * 0.17),
-    maxTextWidth
-  );
-  const animalsSize = fitFontSize(
-    "Animals",
-    800,
-    Math.min(140, titleW * 0.2),
-    maxTextWidth
-  );
-  const discoveryFont = `800 ${discoverySize}px 'Baloo 2'`;
-  const animalsFont = `800 ${animalsSize}px 'Baloo 2'`;
-
-  const dH = textHeight("Discovery", discoveryFont);
-  const aH = textHeight("Animals", animalsFont);
-  const gap = 34;
-  const pad = isPortrait ? 20 : (titleH - dH - aH - gap) / 2;
-
-  const dy = titleY + pad;
-  const ay = dy + dH + gap;
+  const dy = titleY + titlePaddingY;
+  const ay = dy + dH + titleGap;
 
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
