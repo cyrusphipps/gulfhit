@@ -23,6 +23,18 @@
 <script>
 const canvas = document.getElementById("c");
 const ctx = canvas.getContext("2d");
+const introAudio = new Audio("audio/animals/intro.mp3");
+introAudio.loop = true;
+
+function startIntroAudio() {
+  const playPromise = introAudio.play();
+  if (playPromise && typeof playPromise.catch === "function") {
+    playPromise.catch(() => {
+      document.addEventListener("click", startIntroAudio, { once: true });
+      document.addEventListener("touchstart", startIntroAudio, { once: true });
+    });
+  }
+}
 
 function resize() {
   canvas.width = window.innerWidth;
@@ -30,6 +42,7 @@ function resize() {
 }
 window.addEventListener("resize", resize);
 resize();
+startIntroAudio();
 
 /* =========================
    Play button hit area
@@ -56,7 +69,9 @@ canvas.addEventListener("click", e => {
   const my = e.clientY - r.top;
 
   if (mx >= x && mx <= x + w && my >= y && my <= y + h) {
-    window.location.href = "#game"; // placeholder
+    introAudio.pause();
+    introAudio.currentTime = 0;
+    window.location.href = "index.html";
   }
 });
 
