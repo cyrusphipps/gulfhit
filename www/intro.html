@@ -76,14 +76,6 @@ canvas.addEventListener("click", e => {
 });
 
 /* =========================
-   Assets
-========================= */
-const cardImg = new Image();
-cardImg.crossOrigin = "anonymous";
-cardImg.src =
-  "https://images.unsplash.com/photo-1527118732049-c88155f2107c?w=500&auto=format&fit=crop&q=60";
-
-/* =========================
    Cards
 ========================= */
 const CARD_W = 138;
@@ -93,6 +85,50 @@ const CARD_THICKNESS = 6;
 
 const CARD_COUNT = 23;
 const FLIP_COUNT = 6;
+
+/* =========================
+   Assets
+========================= */
+const animalImagePaths = [
+  "img/animals/g1_bird_p1.webp",
+  "img/animals/g1_cat_p1.webp",
+  "img/animals/g1_dog_p1.webp",
+  "img/animals/g1_fish_p1.webp",
+  "img/animals/g1_horse_p1.webp",
+  "img/animals/g1_spider_p1.webp",
+  "img/animals/g2_bear_p1.webp",
+  "img/animals/g2_bee_p1.webp",
+  "img/animals/g2_dolphin_p1.webp",
+  "img/animals/g2_duck_p1.webp",
+  "img/animals/g2_frog_p1.webp",
+  "img/animals/g2_lizard_p1.webp",
+  "img/animals/g3_chicken_p1.webp",
+  "img/animals/g3_ladybug_p1.webp",
+  "img/animals/g3_lion_p1.webp",
+  "img/animals/g3_monkey_p1.webp",
+  "img/animals/g3_mouse_p1.webp",
+  "img/animals/g3_panda_p1.webp",
+  "img/animals/g4_cow_p1.webp",
+  "img/animals/g4_elephant_p1.webp",
+  "img/animals/g4_orca_p1.webp",
+  "img/animals/g4_penguin_p1.webp",
+  "img/animals/g4_rabbit_p1.webp"
+];
+
+function shuffleArray(items) {
+  for (let i = items.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [items[i], items[j]] = [items[j], items[i]];
+  }
+  return items;
+}
+
+const shuffledAnimalImages = shuffleArray([...animalImagePaths]).slice(0, CARD_COUNT);
+const cardImages = shuffledAnimalImages.map(src => {
+  const img = new Image();
+  img.src = src;
+  return img;
+});
 
 const cards = [];
 const directions = ["E","W","N","S"];
@@ -116,7 +152,8 @@ for (let i = 0; i < CARD_COUNT; i++) {
     canFlip: flipping.has(i),
     flipPhase: Math.random() * Math.PI * 2,
     flipSpeed: 1.0 + Math.random() * 0.6,
-    backColor: backColors[i % backColors.length]
+    backColor: backColors[i % backColors.length],
+    image: cardImages[i % cardImages.length]
   });
 }
 
@@ -138,6 +175,16 @@ function textHeight(text, font) {
   const m = ctx.measureText(text);
   return (m.actualBoundingBoxAscent || 0) +
          (m.actualBoundingBoxDescent || 0);
+}
+
+function fitFontSize(text, weight, baseSize, maxWidth, minSize = 32) {
+  ctx.font = `${weight} ${baseSize}px 'Baloo 2'`;
+  const width = ctx.measureText(text).width;
+  if (width <= maxWidth) {
+    return baseSize;
+  }
+  const scaled = Math.floor(baseSize * (maxWidth / width));
+  return Math.max(minSize, scaled);
 }
 
 /* =========================
@@ -183,7 +230,7 @@ function loop(t) {
     ctx.clip();
 
     if (flip >= 0) {
-      ctx.drawImage(cardImg, -CARD_W/2, -CARD_H/2, CARD_W, CARD_H);
+      ctx.drawImage(c.image, -CARD_W/2, -CARD_H/2, CARD_W, CARD_H);
     } else {
       ctx.fillStyle = c.backColor;
       ctx.fillRect(-CARD_W/2, -CARD_H/2, CARD_W, CARD_H);
@@ -199,6 +246,7 @@ function loop(t) {
   const titleH = Math.min(420, canvas.height * 0.45);
   const titleX = (canvas.width - titleW) / 2;
   const titleY = canvas.height * 0.12;
+  const isPortrait = canvas.height > canvas.width;
 
   ctx.fillStyle = "#2f3a5f";
   roundRect(titleX, titleY, titleW, titleH, 40);
@@ -212,13 +260,27 @@ function loop(t) {
   /* =========================
      Title Text
   ========================= */
-  const discoveryFont = `800 ${Math.min(120, titleW * 0.17)}px 'Baloo 2'`;
-  const animalsFont   = `800 ${Math.min(140, titleW * 0.2)}px 'Baloo 2'`;
+  const titlePaddingX = isPortrait ? 45 : 30;
+  const maxTextWidth = titleW - titlePaddingX * 2;
+  const discoverySize = fitFontSize(
+    "Discovery",
+    800,
+    Math.min(120, titleW * 0.17),
+    maxTextWidth
+  );
+  const animalsSize = fitFontSize(
+    "Animals",
+    800,
+    Math.min(140, titleW * 0.2),
+    maxTextWidth
+  );
+  const discoveryFont = `800 ${discoverySize}px 'Baloo 2'`;
+  const animalsFont = `800 ${animalsSize}px 'Baloo 2'`;
 
   const dH = textHeight("Discovery", discoveryFont);
   const aH = textHeight("Animals", animalsFont);
   const gap = 34;
-  const pad = (titleH - dH - aH - gap) / 2;
+  const pad = isPortrait ? 20 : (titleH - dH - aH - gap) / 2;
 
   const dy = titleY + pad;
   const ay = dy + dH + gap;
@@ -241,10 +303,25 @@ function loop(t) {
   /* =========================
      Play Button
   ========================= */
+  const footerText = "Early Jumpers Studios";
+  const footerPadding = 15;
+  const footerH = 26;
+  const footerY = canvas.height - footerH - 15;
+
+  ctx.font = "700 16px 'Baloo 2'";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  const footerTextW = ctx.measureText(footerText).width;
+  const footerW = footerTextW + footerPadding * 2;
+  const footerX = canvas.width / 2 - footerW / 2;
+
   const btnW = Math.min(280, canvas.width * 0.4);
   const btnH = 84;
   const btnX = canvas.width / 2 - btnW / 2;
-  const btnY = titleY + titleH + 80;
+  const defaultBtnY = titleY + titleH + 80;
+  const maxBtnY = footerY - 10 - btnH;
+  const btnY = Math.min(defaultBtnY, maxBtnY);
 
   playBtnBounds = { x: btnX, y: btnY, w: btnW, h: btnH };
 
@@ -282,19 +359,10 @@ function loop(t) {
   /* =========================
      Footer
   ========================= */
-  const footerText = "Early Jumpers Studios";
-  const footerPadding = 15;
-  const footerH = 26;
-  const footerY = canvas.height - footerH - 15;
-
   // set footer font/state explicitly (prevents weird carry-over)
   ctx.font = "700 16px 'Baloo 2'";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-
-  const footerTextW = ctx.measureText(footerText).width;
-  const footerW = footerTextW + footerPadding * 2;
-  const footerX = canvas.width / 2 - footerW / 2;
 
   ctx.fillStyle = "rgba(0,0,0,0.6)";
   roundRect(footerX, footerY, footerW, footerH, 10);
