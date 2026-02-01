@@ -222,6 +222,7 @@ let attemptCount = 0;
 let recognizing = false;
 let lastWrongVariantSound = null;
 let lastOneMoreTimeSound = null;
+let lastCorrectVariantSound = null;
 let lastPreQuestionFolder = null;
 let preQuestionFolderStreak = 0;
 
@@ -882,6 +883,16 @@ function initAnimalsGame() {
       hideUnlockModal();
     });
   }
+  if (unlockModalImageEl) {
+    unlockModalImageEl.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (!unlockedAnimalForModal) return;
+      const effectSound = animalEffectEls[unlockedAnimalForModal.name];
+      if (effectSound) {
+        playSound(effectSound);
+      }
+    });
+  }
   if (unlockModalEl) {
     unlockModalEl.addEventListener("click", (event) => {
       if (event.target === unlockModalEl) {
@@ -908,6 +919,7 @@ function startNewGame() {
   sttFatalError = false;
   lastWrongVariantSound = null;
   lastOneMoreTimeSound = null;
+  lastCorrectVariantSound = null;
   lastPreQuestionFolder = null;
   preQuestionFolderStreak = 0;
   lastAnimalCelebrationSound = {};
@@ -1114,7 +1126,8 @@ function handleCorrect(animal) {
     progressSummaryEl.textContent = `Level for ${animal.name}: ${level}`;
   }
 
-  const variant = chooseRandomSound(soundCorrectVariantEls);
+  const variant = chooseRandomSound(soundCorrectVariantEls, lastCorrectVariantSound);
+  if (variant) lastCorrectVariantSound = variant;
   const celebrationPool = animalCelebrationEls[animal.name] || [];
   const lastCelebration = lastAnimalCelebrationSound[animal.name];
   const celebration = chooseRandomSound(celebrationPool, lastCelebration);
